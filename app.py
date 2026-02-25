@@ -6,22 +6,23 @@ import psycopg2.extras
 
 app = Flask(__name__)
 app.secret_key = "supersekretnyklucz123"
-app.debug = True  # tymczasowo włączone dla debugowania
+app.debug = True  # tymczasowo włączone, pokazuje stacktrace w przeglądarce
 
 # Pobranie URL bazy z Environment
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
-    raise Exception("DATABASE_URL nie ustawione! Dodaj zmienną środowiskową.")
+    raise Exception("DATABASE_URL nie ustawione! Dodaj zmienną środowiskową w Render!")
 
 # Połączenie z bazą
 def get_db():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
 
-# Tworzenie tabel jeśli nie istnieją
+# Tworzymy tabele jeśli nie istnieją
 def create_tables_if_not_exist():
     conn = get_db()
     cur = conn.cursor()
+    # tabela użytkowników
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -30,6 +31,7 @@ def create_tables_if_not_exist():
         role TEXT
     );
     """)
+    # tabela zleceń
     cur.execute("""
     CREATE TABLE IF NOT EXISTS orders (
         id SERIAL PRIMARY KEY,
@@ -91,7 +93,7 @@ def is_logged():
 def current_user():
     return session.get("user")
 
-# Logowanie
+# Strona logowania
 @app.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -130,7 +132,7 @@ def logout():
     session.clear()
     return redirect("/")
 
-# Panel admina
+# Panel admin
 @app.route("/admin", methods=["GET","POST"])
 def admin():
     if not is_logged() or session["role"]!="admin":
@@ -184,8 +186,8 @@ def admin():
         <div style='background:white;padding:15px;margin-bottom:10px;border-radius:8px'>
             <b>{status_icon(z['status'])} {z['client']}</b> | {z['address']} | {z['date']}<br>
             Kierowca: {z['driver'].capitalize()}<br>
-            Status: {z['status']} | Ilość: {z['quantity']} m³ | Płatność: {z['payment']} | Kwota: {z['amount']}<br>
-            Notatki: {z['notes']} | Powód: {z['reason']}
+            Status: {z['status']} | Ilość: {z['quantity'] or ""} m³ | Płatność: {z['payment'] or ""} | Kwota: {z['amount'] or ""}<br>
+            Notatki: {z['notes'] or ""} | Powód: {z['reason'] or ""}
         </div>
         """
     html += "</body>"
