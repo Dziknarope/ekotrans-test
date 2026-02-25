@@ -6,50 +6,68 @@ import psycopg2.extras
 
 app = Flask(__name__)
 app.secret_key = "supersekretnyklucz123"
-app.debug = True  # pokazuje stacktrace w przeglądarce
+app.debug = True
 
-# Pobranie URL bazy z Environment
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise Exception("DATABASE_URL nie ustawione! Dodaj zmienną środowiskową w Render!")
 
-# Połączenie z bazą
 def get_db():
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
-    return conn
+    return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 
-# Tworzenie tabel jeśli ich brak
+# ======================
+# Funkcje tworzące tabele
+# ======================
+
 def create_tables_if_not_exist():
     conn = get_db()
     cur = conn.cursor()
+    # Tabela users
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        login TEXT UNIQUE,
-        password TEXT,
-        role TEXT
-    );
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            login TEXT UNIQUE,
+            password TEXT,
+            role TEXT
+        );
     """)
+    # Tabela orders
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS orders (
-        id SERIAL PRIMARY KEY,
-        client TEXT,
-        address TEXT,
-        date DATE,
-        status TEXT,
-        driver TEXT,
-        quantity REAL,
-        payment TEXT,
-        amount REAL,
-        notes TEXT,
-        reason TEXT
-    );
+        CREATE TABLE IF NOT EXISTS orders (
+            id SERIAL PRIMARY KEY,
+            client TEXT,
+            address TEXT,
+            date DATE,
+            status TEXT,
+            driver TEXT
+        );
     """)
+    conn.commit()
+    # Sprawdzenie i dodanie brakujących kolumn
+    columns_to_add = {
+        "quantity":"REAL",
+        "payment":"TEXT",
+        "amount":"REAL",
+        "notes":"TEXT",
+        "reason":"TEXT"
+    }
+    for col, col_type in columns_to_add.items():
+        cur.execute(f"""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='orders' AND column_name='{col}'
+                ) THEN
+                    ALTER TABLE orders ADD COLUMN {col} {col_type};
+                END IF;
+            END
+            $$;
+        """)
     conn.commit()
     cur.close()
     conn.close()
 
-# Dodanie domyślnych użytkowników
 def create_default_users():
     conn = get_db()
     cur = conn.cursor()
@@ -62,15 +80,12 @@ def create_default_users():
         ("emil", "Turcja123", "driver")
     ]
     for login, password, role in users:
-        cur.execute(
-            "INSERT INTO users (login,password,role) VALUES (%s,%s,%s) ON CONFLICT (login) DO NOTHING",
-            (login,password,role)
-        )
+        cur.execute("INSERT INTO users (login,password,role) VALUES (%s,%s,%s) ON CONFLICT (login) DO NOTHING",
+                    (login,password,role))
     conn.commit()
     cur.close()
     conn.close()
 
-# Dodanie przykładowych zleceń
 def create_sample_orders():
     conn = get_db()
     cur = conn.cursor()
@@ -81,40 +96,43 @@ def create_sample_orders():
         ("KlientD", "Adres 4", str(date.today()), "NIE WYKONANE", "dyzio", 0, "", 0, "", "brak dojazdu")
     ]
     for client, address, date_input, status, driver, quantity, payment, amount, notes, reason in sample_orders:
-        cur.execute(
-            "INSERT INTO orders (client,address,date,status,driver,quantity,payment,amount,notes,reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-            (client,address,date_input,status,driver,quantity,payment,amount,notes,reason)
-        )
+        cur.execute("""
+            INSERT INTO orders (client,address,date,status,driver,quantity,payment,amount,notes,reason)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT DO NOTHING
+        """, (client,address,date_input,status,driver,quantity,payment,amount,notes,reason))
     conn.commit()
     cur.close()
     conn.close()
 
-# Inicjalizacja przy starcie
+# ======================
+# Inicjalizacja
+# ======================
 create_tables_if_not_exist()
 create_default_users()
 create_sample_orders()
 
-# Kolory / ikonki statusów
+# ======================
+# Funkcje pomocnicze
+# ======================
 def status_icon(status):
-    if status == "WYKONANE":
-        return "✅"
-    if status == "W TOKU":
-        return "🟡"
-    if status == "NIE WYKONANE":
-        return "❌"
+    if status=="WYKONANE": return "✅"
+    if status=="W TOKU": return "🟡"
+    if status=="NIE WYKONANE": return "❌"
     return "⚪"
 
-# Sesje
 def is_logged():
     return "user" in session
 
 def current_user():
     return session.get("user")
 
-# Logowanie
-@app.route("/", methods=["GET", "POST"])
+# ======================
+# Routes
+# ======================
+@app.route("/", methods=["GET","POST"])
 def login():
-    if request.method == "POST":
+    if request.method=="POST":
         login_input = request.form["login"]
         password_input = request.form["password"]
         conn = get_db()
@@ -126,21 +144,14 @@ def login():
         if user:
             session["user"] = user["login"]
             session["role"] = user["role"]
-            if user["role"]=="admin":
-                return redirect("/admin")
-            else:
-                return redirect("/driver")
+            return redirect("/admin") if user["role"]=="admin" else redirect("/driver")
     return """
     <body style='background:#f4f6f9;font-family:Arial;padding:40px;text-align:center'>
         <h2>🔐 Logowanie EkoTrans</h2>
         <form method='post' style='background:white;padding:30px;border-radius:10px;display:inline-block'>
-            Login:<br>
-            <input name='login' style='padding:10px;margin-bottom:10px'><br>
-            Hasło:<br>
-            <input type='password' name='password' style='padding:10px;margin-bottom:20px'><br>
-            <button type='submit' style='padding:10px 20px;background:#4caf50;color:white;border:none;border-radius:5px'>
-                Zaloguj
-            </button>
+            Login:<br><input name='login' style='padding:10px;margin-bottom:10px'><br>
+            Hasło:<br><input type='password' name='password' style='padding:10px;margin-bottom:20px'><br>
+            <button type='submit' style='padding:10px 20px;background:#4caf50;color:white;border:none;border-radius:5px'>Zaloguj</button>
         </form>
     </body>
     """
@@ -153,8 +164,7 @@ def logout():
 # Panel admin
 @app.route("/admin", methods=["GET","POST"])
 def admin():
-    if not is_logged() or session["role"]!="admin":
-        return redirect("/")
+    if not is_logged() or session["role"]!="admin": return redirect("/")
     conn = get_db()
     cur = conn.cursor()
     if request.method=="POST":
@@ -172,18 +182,28 @@ def admin():
     conn.close()
 
     html = f"<body style='background:#f4f6f9;font-family:Arial;padding:30px'><h2>📋 Panel Admin</h2>Zalogowany: {current_user().capitalize()} | <a href='/logout'>Wyloguj</a><br><br>"
-    html += "<h3>➕ Dodaj nowe zlecenie</h3><form method='post' style='background:white;padding:20px;border-radius:10px;margin-bottom:30px'>Klient:<br><input name='client' style='width:100%;padding:10px;margin-bottom:10px'>Adres:<br><input name='address' style='width:100%;padding:10px;margin-bottom:10px'>Data:<br><input type='date' name='date' value='{str(date.today())}' style='width:100%;padding:10px;margin-bottom:10px'>Kierowca:<br><select name='driver' style='width:100%;padding:10px;margin-bottom:20px'><option>Leszek</option><option>Tadeusz</option><option>Marcel</option><option>Dyzio</option><option>Emil</option></select><button type='submit' style='padding:12px 20px;background:#4caf50;color:white;border:none;border-radius:6px'>Dodaj zlecenie</button></form>"
+    html += "<h3>➕ Dodaj nowe zlecenie</h3>"
+    html += "<form method='post' style='background:white;padding:20px;border-radius:10px;margin-bottom:30px'>"
+    html += "Klient:<br><input name='client' style='width:100%;padding:10px;margin-bottom:10px'>"
+    html += "Adres:<br><input name='address' style='width:100%;padding:10px;margin-bottom:10px'>"
+    html += f"Data:<br><input type='date' name='date' value='{str(date.today())}' style='width:100%;padding:10px;margin-bottom:10px'>"
+    html += "Kierowca:<br><select name='driver' style='width:100%;padding:10px;margin-bottom:20px'>"
+    html += "<option>Leszek</option><option>Tadeusz</option><option>Marcel</option><option>Dyzio</option><option>Emil</option></select>"
+    html += "<button type='submit' style='padding:12px 20px;background:#4caf50;color:white;border:none;border-radius:6px'>Dodaj zlecenie</button></form>"
+
     html += "<h3>📦 Wszystkie zlecenia</h3>"
     for z in orders:
-        html += f"<div style='background:white;padding:15px;margin-bottom:10px;border-radius:8px'><b>{status_icon(z['status'])} {z['client']}</b> | {z['address']} | {z['date']}<br>Kierowca: {z['driver'].capitalize()}<br>Status: {z['status']} | Ilość: {z['quantity'] or ''} m³ | Płatność: {z['payment'] or ''} | Kwota: {z['amount'] or ''}<br>Notatki: {z['notes'] or ''} | Powód: {z['reason'] or ''}</div>"
+        html += f"<div style='background:white;padding:15px;margin-bottom:10px;border-radius:8px'>"
+        html += f"<b>{status_icon(z['status'])} {z['client']}</b> | {z['address']} | {z['date']}<br>"
+        html += f"Kierowca: {z['driver'].capitalize()}<br>Status: {z['status']} | Ilość: {z['quantity'] or ''} m³ | Płatność: {z['payment'] or ''} | Kwota: {z['amount'] or ''}<br>"
+        html += f"Notatki: {z['notes'] or ''} | Powód: {z['reason'] or ''}</div>"
     html += "</body>"
     return html
 
 # Panel kierowcy
 @app.route("/driver", methods=["GET","POST"])
 def driver():
-    if not is_logged() or session["role"]!="driver":
-        return redirect("/")
+    if not is_logged() or session["role"]!="driver": return redirect("/")
     user = current_user().capitalize()
     conn = get_db()
     cur = conn.cursor()
@@ -205,7 +225,23 @@ def driver():
     html = f"<body style='background:#f4f6f9;font-family:Arial;padding:30px'><h2>🚛 Panel Kierowcy</h2>Zalogowany: {user} | <a href='/logout'>Wyloguj</a><br><br>"
     for z in orders:
         icon = status_icon(z['status'])
-        html += f"<form method='post' style='background:white;padding:20px;margin-bottom:20px;border-radius:10px'><b>{icon} {z['client']}</b><br>{z['address']} | {z['date']}<br><br><input type='hidden' name='order' value='{z['id']}'><br>Status:<br><select name='status' style='width:100%;padding:10px;margin-bottom:10px'><option value='W TOKU' {'selected' if z['status']=='W TOKU' else ''}>🟡 W TOKU</option><option value='WYKONANE' {'selected' if z['status']=='WYKONANE' else ''}>✅ WYKONANE</option><option value='NIE WYKONANE' {'selected' if z['status']=='NIE WYKONANE' else ''}>❌ NIE WYKONANE</option></select><br>Powód:<br><select name='reason' style='width:100%;padding:10px;margin-bottom:10px'><option value=''>-</option><option value='brak dojazdu' {'selected' if z['reason']=='brak dojazdu' else ''}>Brak dojazdu</option><option value='inny termin' {'selected' if z['reason']=='inny termin' else ''}>Inny termin</option></select><br>Ilość (m³):<br><input name='quantity' value='{z['quantity'] or ""}' style='width:100%;padding:10px;margin-bottom:10px'><br>Płatność:<br><select name='payment' style='width:100%;padding:10px;margin-bottom:10px'><option value='Gotówka' {'selected' if z['payment']=='Gotówka' else ''}>Gotówka</option><option value='Przelew' {'selected' if z['payment']=='Przelew' else ''}>Przelew</option></select><br>Kwota:<br><input name='amount' value='{z['amount'] or ""}' style='width:100%;padding:10px;margin-bottom:10px'><br>Notatki:<br><input name='notes' value='{z['notes'] or ""}' style='width:100%;padding:10px;margin-bottom:20px'><br><button type='submit' style='width:100%;padding:12px;background:#2196f3;color:white;border:none;border-radius:6px'>Zaktualizuj zlecenie</button></form>"
+        html += f"<form method='post' style='background:white;padding:20px;margin-bottom:20px;border-radius:10px'>"
+        html += f"<b>{icon} {z['client']}</b><br>{z['address']} | {z['date']}<br>"
+        html += f"<input type='hidden' name='order' value='{z['id']}'><br>Status:<br>"
+        html += f"<select name='status' style='width:100%;padding:10px;margin-bottom:10px'>"
+        html += f"<option value='W TOKU' {'selected' if z['status']=='W TOKU' else ''}>🟡 W TOKU</option>"
+        html += f"<option value='WYKONANE' {'selected' if z['status']=='WYKONANE' else ''}>✅ WYKONANE</option>"
+        html += f"<option value='NIE WYKONANE' {'selected' if z['status']=='NIE WYKONANE' else ''}>❌ NIE WYKONANE</option></select><br>"
+        html += f"Powód:<br><select name='reason' style='width:100%;padding:10px;margin-bottom:10px'>"
+        html += f"<option value=''>-</option><option value='brak dojazdu' {'selected' if z['reason']=='brak dojazdu' else ''}>Brak dojazdu</option>"
+        html += f"<option value='inny termin' {'selected' if z['reason']=='inny termin' else ''}>Inny termin</option></select><br>"
+        html += f"Ilość (m³):<br><input name='quantity' value='{z['quantity'] or ""}' style='width:100%;padding:10px;margin-bottom:10px'><br>"
+        html += f"Płatność:<br><select name='payment' style='width:100%;padding:10px;margin-bottom:10px'>"
+        html += f"<option value='Gotówka' {'selected' if z['payment']=='Gotówka' else ''}>Gotówka</option>"
+        html += f"<option value='Przelew' {'selected' if z['payment']=='Przelew' else ''}>Przelew</option></select><br>"
+        html += f"Kwota:<br><input name='amount' value='{z['amount'] or ""}' style='width:100%;padding:10px;margin-bottom:10px'><br>"
+        html += f"Notatki:<br><input name='notes' value='{z['notes'] or ""}' style='width:100%;padding:10px;margin-bottom:20px'><br>"
+        html += "<button type='submit' style='width:100%;padding:12px;background:#2196f3;color:white;border:none;border-radius:6px'>Zaktualizuj zlecenie</button></form>"
     html += "</body>"
     return html
 
