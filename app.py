@@ -10,60 +10,62 @@ app.debug = True
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
-    raise Exception("DATABASE_URL nie ustawione! Dodaj zmienną środowiskową w Render!")
+    raise Exception("Brak DATABASE_URL")
 
 def get_db():
     return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 
-# ======================
-# Funkcje tworzące tabele
-# ======================
+# =====================================================
+# INICJALIZACJA BAZY (NIC NIE USUWAMY, TYLKO DODAJEMY)
+# =====================================================
 
-def create_tables_if_not_exist():
+def init_db():
     conn = get_db()
     cur = conn.cursor()
-    # Tabela users
+
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            login TEXT UNIQUE,
-            password TEXT,
-            role TEXT
-        );
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        login TEXT UNIQUE,
+        password TEXT,
+        role TEXT
+    );
     """)
-    # Tabela orders
+
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS orders (
-            id SERIAL PRIMARY KEY,
-            client TEXT,
-            address TEXT,
-            date DATE,
-            status TEXT,
-            driver TEXT
-        );
+    CREATE TABLE IF NOT EXISTS orders (
+        id SERIAL PRIMARY KEY,
+        client TEXT,
+        address TEXT,
+        date DATE,
+        status TEXT,
+        driver TEXT
+    );
     """)
-    conn.commit()
-    # Sprawdzenie i dodanie brakujących kolumn
-    columns_to_add = {
-        "quantity":"REAL",
-        "payment":"TEXT",
-        "amount":"REAL",
-        "notes":"TEXT",
-        "reason":"TEXT"
+
+    # brakujące kolumny
+    columns = {
+        "quantity": "REAL",
+        "payment": "TEXT",
+        "amount": "REAL",
+        "notes": "TEXT",
+        "reason": "TEXT",
+        "position": "INTEGER DEFAULT 1"
     }
-    for col, col_type in columns_to_add.items():
+
+    for col, typ in columns.items():
         cur.execute(f"""
-            DO $$
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns 
-                    WHERE table_name='orders' AND column_name='{col}'
-                ) THEN
-                    ALTER TABLE orders ADD COLUMN {col} {col_type};
-                END IF;
-            END
-            $$;
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='orders' AND column_name='{col}'
+            ) THEN
+                ALTER TABLE orders ADD COLUMN {col} {typ};
+            END IF;
+        END $$;
         """)
+
     conn.commit()
     cur.close()
     conn.close()
@@ -79,81 +81,56 @@ def create_default_users():
         ("dyzio", "LKR40306", "driver"),
         ("emil", "Turcja123", "driver")
     ]
-    for login, password, role in users:
-        cur.execute("INSERT INTO users (login,password,role) VALUES (%s,%s,%s) ON CONFLICT (login) DO NOTHING",
-                    (login,password,role))
+    for u in users:
+        cur.execute("INSERT INTO users (login,password,role) VALUES (%s,%s,%s) ON CONFLICT (login) DO NOTHING", u)
     conn.commit()
     cur.close()
     conn.close()
 
-def create_sample_orders():
-    conn = get_db()
-    cur = conn.cursor()
-    sample_orders = [
-        ("KlientA", "Adres 1", str(date.today()), "DO REALIZACJI", "leszek", 2.5, "Gotówka", 100, "Bez uwag", None),
-        ("KlientB", "Adres 2", str(date.today()), "W TOKU", "tadeusz", 1.2, "Przelew", 50, "Spakowane", None),
-        ("KlientC", "Adres 3", str(date.today()), "WYKONANE", "marcel", 3.0, "Gotówka", 150, "Zrealizowane", None),
-        ("KlientD", "Adres 4", str(date.today()), "NIE WYKONANE", "dyzio", 0, "", 0, "", "brak dojazdu")
-    ]
-    for client, address, date_input, status, driver, quantity, payment, amount, notes, reason in sample_orders:
-        cur.execute("""
-            INSERT INTO orders (client,address,date,status,driver,quantity,payment,amount,notes,reason)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT DO NOTHING
-        """, (client,address,date_input,status,driver,quantity,payment,amount,notes,reason))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-# ======================
-# Inicjalizacja
-# ======================
-create_tables_if_not_exist()
+init_db()
 create_default_users()
-create_sample_orders()
 
-# ======================
-# Funkcje pomocnicze
-# ======================
-def status_icon(status):
-    if status=="WYKONANE": return "✅"
-    if status=="W TOKU": return "🟡"
-    if status=="NIE WYKONANE": return "❌"
+# =====================================================
+# POMOCNICZE
+# =====================================================
+
+def is_admin():
+    return session.get("role") == "admin"
+
+def is_driver():
+    return session.get("role") == "driver"
+
+def status_icon(s):
+    if s == "WYKONANE": return "✅"
+    if s == "W TOKU": return "🟡"
+    if s == "NIE WYKONANE": return "❌"
     return "⚪"
 
-def is_logged():
-    return "user" in session
+# =====================================================
+# LOGIN
+# =====================================================
 
-def current_user():
-    return session.get("user")
-
-# ======================
-# Routes
-# ======================
 @app.route("/", methods=["GET","POST"])
 def login():
-    if request.method=="POST":
-        login_input = request.form["login"]
-        password_input = request.form["password"]
+    if request.method == "POST":
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT * FROM users WHERE login=%s AND password=%s", (login_input,password_input))
+        cur.execute("SELECT * FROM users WHERE login=%s AND password=%s",
+                    (request.form["login"], request.form["password"]))
         user = cur.fetchone()
         cur.close()
         conn.close()
         if user:
             session["user"] = user["login"]
             session["role"] = user["role"]
-            return redirect("/admin") if user["role"]=="admin" else redirect("/driver")
+            return redirect("/admin" if user["role"]=="admin" else "/driver")
     return """
-    <body style='background:#f4f6f9;font-family:Arial;padding:40px;text-align:center'>
-        <h2>🔐 Logowanie EkoTrans</h2>
-        <form method='post' style='background:white;padding:30px;border-radius:10px;display:inline-block'>
-            Login:<br><input name='login' style='padding:10px;margin-bottom:10px'><br>
-            Hasło:<br><input type='password' name='password' style='padding:10px;margin-bottom:20px'><br>
-            <button type='submit' style='padding:10px 20px;background:#4caf50;color:white;border:none;border-radius:5px'>Zaloguj</button>
-        </form>
-    </body>
+    <h2>Logowanie</h2>
+    <form method='post'>
+    Login:<br><input name='login'><br>
+    Hasło:<br><input type='password' name='password'><br><br>
+    <button>Zaloguj</button>
+    </form>
     """
 
 @app.route("/logout")
@@ -161,90 +138,187 @@ def logout():
     session.clear()
     return redirect("/")
 
-# Panel admin
+# =====================================================
+# ADMIN – AKTYWNE
+# =====================================================
+
 @app.route("/admin", methods=["GET","POST"])
 def admin():
-    if not is_logged() or session["role"]!="admin": return redirect("/")
+    if not is_admin():
+        return redirect("/")
+
     conn = get_db()
     cur = conn.cursor()
-    if request.method=="POST":
-        client = request.form["client"]
-        address = request.form["address"]
-        date_input = request.form["date"]
-        driver = request.form["driver"]
-        cur.execute("INSERT INTO orders (client,address,date,status,driver) VALUES (%s,%s,%s,%s,%s)",
-                    (client,address,date_input,"DO REALIZACJI",driver.lower()))
+
+    if request.method == "POST":
+        cur.execute("""
+        UPDATE orders SET
+            status=%s,
+            driver=%s,
+            date=%s,
+            position=%s
+        WHERE id=%s
+        """, (
+            request.form["status"],
+            request.form["driver"],
+            request.form["date"],
+            request.form["position"],
+            request.form["order_id"]
+        ))
         conn.commit()
-        return redirect("/admin")
-    cur.execute("SELECT * FROM orders ORDER BY date DESC")
+
+    cur.execute("""
+    SELECT * FROM orders
+    WHERE status != 'WYKONANE'
+    ORDER BY date, driver, position
+    """)
     orders = cur.fetchall()
     cur.close()
     conn.close()
 
-    html = f"<body style='background:#f4f6f9;font-family:Arial;padding:30px'><h2>📋 Panel Admin</h2>Zalogowany: {current_user().capitalize()} | <a href='/logout'>Wyloguj</a><br><br>"
-    html += "<h3>➕ Dodaj nowe zlecenie</h3>"
-    html += "<form method='post' style='background:white;padding:20px;border-radius:10px;margin-bottom:30px'>"
-    html += "Klient:<br><input name='client' style='width:100%;padding:10px;margin-bottom:10px'>"
-    html += "Adres:<br><input name='address' style='width:100%;padding:10px;margin-bottom:10px'>"
-    html += f"Data:<br><input type='date' name='date' value='{str(date.today())}' style='width:100%;padding:10px;margin-bottom:10px'>"
-    html += "Kierowca:<br><select name='driver' style='width:100%;padding:10px;margin-bottom:20px'>"
-    html += "<option>Leszek</option><option>Tadeusz</option><option>Marcel</option><option>Dyzio</option><option>Emil</option></select>"
-    html += "<button type='submit' style='padding:12px 20px;background:#4caf50;color:white;border:none;border-radius:6px'>Dodaj zlecenie</button></form>"
+    html = "<h2>🔵 AKTYWNE</h2>"
+    html += "<a href='/admin/done'>WYKONANE</a><br><br>"
 
-    html += "<h3>📦 Wszystkie zlecenia</h3>"
     for z in orders:
-        html += f"<div style='background:white;padding:15px;margin-bottom:10px;border-radius:8px'>"
-        html += f"<b>{status_icon(z['status'])} {z['client']}</b> | {z['address']} | {z['date']}<br>"
-        html += f"Kierowca: {z['driver'].capitalize()}<br>Status: {z['status']} | Ilość: {z['quantity'] or ''} m³ | Płatność: {z['payment'] or ''} | Kwota: {z['amount'] or ''}<br>"
-        html += f"Notatki: {z['notes'] or ''} | Powód: {z['reason'] or ''}</div>"
-    html += "</body>"
+        html += f"""
+        <form method='post' style='border:1px solid gray;padding:10px;margin:10px'>
+        <b>{status_icon(z['status'])} {z['client']}</b> | {z['address']}<br>
+        Data: <input type='date' name='date' value='{z['date']}'>
+        Kierowca: <input name='driver' value='{z['driver']}'>
+        Kolejność: <input name='position' value='{z['position']}'>
+        Status:
+        <select name='status'>
+            <option {'selected' if z['status']=="DO REALIZACJI" else ""}>DO REALIZACJI</option>
+            <option {'selected' if z['status']=="W TOKU" else ""}>W TOKU</option>
+            <option {'selected' if z['status']=="WYKONANE" else ""}>WYKONANE</option>
+            <option {'selected' if z['status']=="NIE WYKONANE" else ""}>NIE WYKONANE</option>
+        </select>
+        <input type='hidden' name='order_id' value='{z['id']}'>
+        <button>Zapisz</button>
+        </form>
+        """
+
     return html
 
-# Panel kierowcy
+# =====================================================
+# ADMIN – WYKONANE
+# =====================================================
+
+@app.route("/admin/done")
+def admin_done():
+    if not is_admin():
+        return redirect("/")
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM orders WHERE status='WYKONANE' ORDER BY date DESC")
+    orders = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    html = "<h2>🟢 WYKONANE</h2>"
+    html += "<a href='/admin'>AKTYWNE</a><br><br>"
+
+    for z in orders:
+        html += f"{z['date']} | {z['driver']} | {z['client']}<br>"
+
+    return html
+
+# =====================================================
+# TRASÓWKA
+# =====================================================
+
+@app.route("/route/<driver>/<route_date>")
+def route(driver, route_date):
+    if not is_admin():
+        return redirect("/")
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+    SELECT * FROM orders
+    WHERE driver=%s AND date=%s
+    ORDER BY position
+    """, (driver.lower(), route_date))
+    orders = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    html = f"<h2>🚛 Trasa {driver.capitalize()} - {route_date}</h2>"
+
+    for z in orders:
+        html += f"{z['position']}. {z['client']} - {z['address']}<br>"
+
+    return html
+
+# =====================================================
+# PANEL KIEROWCY
+# =====================================================
+
 @app.route("/driver", methods=["GET","POST"])
-def driver():
-    if not is_logged() or session["role"]!="driver": return redirect("/")
-    user = current_user().capitalize()
+def driver_panel():
+    if not is_driver():
+        return redirect("/")
+
+    user = session["user"]
+
     conn = get_db()
     cur = conn.cursor()
-    if request.method=="POST":
-        order_id = int(request.form["order"])
-        cur.execute("""UPDATE orders
-                       SET status=%s, quantity=%s, payment=%s, amount=%s, notes=%s, reason=%s
-                       WHERE id=%s AND driver=%s""",
-                    (request.form["status"], request.form["quantity"], request.form["payment"],
-                     request.form["amount"], request.form["notes"], request.form["reason"],
-                     order_id, user.lower()))
+
+    if request.method == "POST":
+        cur.execute("""
+        UPDATE orders SET
+            status=%s,
+            quantity=%s,
+            payment=%s,
+            amount=%s,
+            notes=%s,
+            reason=%s
+        WHERE id=%s AND driver=%s
+        """, (
+            request.form["status"],
+            request.form["quantity"],
+            request.form["payment"],
+            request.form["amount"],
+            request.form["notes"],
+            request.form["reason"],
+            request.form["order_id"],
+            user
+        ))
         conn.commit()
-        return redirect("/driver")
-    cur.execute("SELECT * FROM orders WHERE driver=%s ORDER BY date DESC", (user.lower(),))
+
+    cur.execute("""
+    SELECT * FROM orders
+    WHERE driver=%s
+    ORDER BY date, position
+    """, (user,))
     orders = cur.fetchall()
     cur.close()
     conn.close()
 
-    html = f"<body style='background:#f4f6f9;font-family:Arial;padding:30px'><h2>🚛 Panel Kierowcy</h2>Zalogowany: {user} | <a href='/logout'>Wyloguj</a><br><br>"
+    html = f"<h2>🚛 Panel kierowcy: {user}</h2>"
+
     for z in orders:
-        icon = status_icon(z['status'])
-        html += f"<form method='post' style='background:white;padding:20px;margin-bottom:20px;border-radius:10px'>"
-        html += f"<b>{icon} {z['client']}</b><br>{z['address']} | {z['date']}<br>"
-        html += f"<input type='hidden' name='order' value='{z['id']}'><br>Status:<br>"
-        html += f"<select name='status' style='width:100%;padding:10px;margin-bottom:10px'>"
-        html += f"<option value='W TOKU' {'selected' if z['status']=='W TOKU' else ''}>🟡 W TOKU</option>"
-        html += f"<option value='WYKONANE' {'selected' if z['status']=='WYKONANE' else ''}>✅ WYKONANE</option>"
-        html += f"<option value='NIE WYKONANE' {'selected' if z['status']=='NIE WYKONANE' else ''}>❌ NIE WYKONANE</option></select><br>"
-        html += f"Powód:<br><select name='reason' style='width:100%;padding:10px;margin-bottom:10px'>"
-        html += f"<option value=''>-</option><option value='brak dojazdu' {'selected' if z['reason']=='brak dojazdu' else ''}>Brak dojazdu</option>"
-        html += f"<option value='inny termin' {'selected' if z['reason']=='inny termin' else ''}>Inny termin</option></select><br>"
-        html += f"Ilość (m³):<br><input name='quantity' value='{z['quantity'] or ""}' style='width:100%;padding:10px;margin-bottom:10px'><br>"
-        html += f"Płatność:<br><select name='payment' style='width:100%;padding:10px;margin-bottom:10px'>"
-        html += f"<option value='Gotówka' {'selected' if z['payment']=='Gotówka' else ''}>Gotówka</option>"
-        html += f"<option value='Przelew' {'selected' if z['payment']=='Przelew' else ''}>Przelew</option></select><br>"
-        html += f"Kwota:<br><input name='amount' value='{z['amount'] or ""}' style='width:100%;padding:10px;margin-bottom:10px'><br>"
-        html += f"Notatki:<br><input name='notes' value='{z['notes'] or ""}' style='width:100%;padding:10px;margin-bottom:20px'><br>"
-        html += "<button type='submit' style='width:100%;padding:12px;background:#2196f3;color:white;border:none;border-radius:6px'>Zaktualizuj zlecenie</button></form>"
-    html += "</body>"
+        html += f"""
+        <form method='post' style='border:1px solid gray;padding:10px;margin:10px'>
+        <b>{status_icon(z['status'])} {z['client']}</b><br>
+        Status:
+        <select name='status'>
+            <option>W TOKU</option>
+            <option>WYKONANE</option>
+            <option>NIE WYKONANE</option>
+        </select><br>
+        Ilość (m³): <input name='quantity' value='{z['quantity'] or ""}'><br>
+        Płatność: <input name='payment' value='{z['payment'] or ""}'><br>
+        Kwota: <input name='amount' value='{z['amount'] or ""}'><br>
+        Powód: <input name='reason' value='{z['reason'] or ""}'><br>
+        Notatki: <input name='notes' value='{z['notes'] or ""}'><br>
+        <input type='hidden' name='order_id' value='{z['id']}'>
+        <button>Zapisz</button>
+        </form>
+        """
+
     return html
 
-if __name__=="__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
