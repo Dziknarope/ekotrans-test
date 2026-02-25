@@ -16,7 +16,7 @@ def get_db():
     return conn
 
 # Tworzymy tabele jeśli nie istnieją
-def init_db():
+def create_tables_if_not_exist():
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
@@ -45,8 +45,8 @@ def init_db():
     cur.close()
     conn.close()
 
-# Dodajemy użytkowników jeśli ich nie ma
-def init_users():
+# Dodajemy domyślnych użytkowników jeśli nie istnieją
+def create_default_users():
     conn = get_db()
     cur = conn.cursor()
     users = [
@@ -58,10 +58,17 @@ def init_users():
         ("emil", "Turcja123", "driver")
     ]
     for login, password, role in users:
-        cur.execute("INSERT INTO users (login,password,role) VALUES (%s,%s,%s) ON CONFLICT (login) DO NOTHING", (login,password,role))
+        cur.execute(
+            "INSERT INTO users (login,password,role) VALUES (%s,%s,%s) ON CONFLICT (login) DO NOTHING",
+            (login,password,role)
+        )
     conn.commit()
     cur.close()
     conn.close()
+
+# Wywołujemy od razu przy imporcie, żeby działało też na Render
+create_tables_if_not_exist()
+create_default_users()
 
 # Kolory statusów
 def status_color(status):
@@ -80,6 +87,7 @@ def is_logged():
 def current_user():
     return session.get("user")
 
+# Strona logowania
 @app.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -92,9 +100,9 @@ def login():
         cur.close()
         conn.close()
         if user:
-            session["user"] = user[1]  # login
-            session["role"] = user[3]  # role
-            if user[3]=="admin":
+            session["user"] = user["login"]
+            session["role"] = user["role"]
+            if user["role"]=="admin":
                 return redirect("/admin")
             else:
                 return redirect("/driver")
@@ -118,6 +126,7 @@ def logout():
     session.clear()
     return redirect("/")
 
+# Panel admin
 @app.route("/admin", methods=["GET","POST"])
 def admin():
     if not is_logged() or session["role"]!="admin":
@@ -169,16 +178,17 @@ def admin():
     for z in orders:
         html += f"""
         <div style='background:white;padding:15px;margin-bottom:10px;border-radius:8px'>
-            <b>{z[1]}</b> | {z[2]} | {z[3]}<br>
-            Kierowca: {z[5]}<br>
-            Status: <span style='color:{status_color(z[4])}'>{z[4]}</span><br>
-            Masa: {z[6]} m³ | Płatność: {z[7]} | Kwota: {z[8]}<br>
-            Notatki: {z[9]}
+            <b>{z['client']}</b> | {z['address']} | {z['date']}<br>
+            Kierowca: {z['driver']}<br>
+            Status: <span style='color:{status_color(z['status'])}'>{z['status']}</span><br>
+            Masa: {z['mass']} m³ | Płatność: {z['payment']} | Kwota: {z['amount']}<br>
+            Notatki: {z['notes']}
         </div>
         """
     html += "</body>"
     return html
 
+# Panel kierowcy
 @app.route("/driver", methods=["GET","POST"])
 def driver():
     if not is_logged() or session["role"]!="driver":
@@ -206,11 +216,11 @@ def driver():
     for z in orders:
         html += f"""
         <form method='post' style='background:white;padding:20px;margin-bottom:20px;border-radius:10px'>
-            <b>{z[1]}</b><br>
-            {z[2]} | {z[3]}<br>
-            Status: {z[4]}<br><br>
+            <b>{z['client']}</b><br>
+            {z['address']} | {z['date']}<br>
+            Status: {z['status']}<br><br>
 
-            <input type='hidden' name='order' value='{z[0]}'>
+            <input type='hidden' name='order' value='{z['id']}'>
 
             Masa (m³):<br>
             <input name='mass' style='width:100%;padding:10px;margin-bottom:10px'>
@@ -236,7 +246,5 @@ def driver():
     return html
 
 if __name__=="__main__":
-    init_db()
-    init_users()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
