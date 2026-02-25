@@ -6,16 +6,19 @@ import psycopg2.extras
 
 app = Flask(__name__)
 app.secret_key = "supersekretnyklucz123"
+app.debug = True  # tymczasowo włączone dla debugowania
 
-# Pobierz URL bazy z Environment
+# Pobranie URL bazy z Environment
 DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise Exception("DATABASE_URL nie ustawione! Dodaj zmienną środowiskową.")
 
 # Połączenie z bazą
 def get_db():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
 
-# Tworzymy tabele jeśli nie istnieją
+# Tworzenie tabel jeśli nie istnieją
 def create_tables_if_not_exist():
     conn = get_db()
     cur = conn.cursor()
@@ -46,7 +49,7 @@ def create_tables_if_not_exist():
     cur.close()
     conn.close()
 
-# Dodajemy domyślnych użytkowników
+# Dodanie domyślnych użytkowników
 def create_default_users():
     conn = get_db()
     cur = conn.cursor()
@@ -88,7 +91,7 @@ def is_logged():
 def current_user():
     return session.get("user")
 
-# Strona logowania
+# Logowanie
 @app.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -127,7 +130,7 @@ def logout():
     session.clear()
     return redirect("/")
 
-# Panel admin
+# Panel admina
 @app.route("/admin", methods=["GET","POST"])
 def admin():
     if not is_logged() or session["role"]!="admin":
@@ -218,7 +221,6 @@ def driver():
     """
 
     for z in orders:
-        # Status ikona
         icon = status_icon(z['status'])
         html += f"""
         <form method='post' style='background:white;padding:20px;margin-bottom:20px;border-radius:10px'>
