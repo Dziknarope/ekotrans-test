@@ -15,9 +15,9 @@ if not DATABASE_URL:
 def get_db():
     return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 
-# =====================================================
-# INICJALIZACJA BAZY (NIC NIE USUWAMY, TYLKO DODAJEMY)
-# =====================================================
+# =====================
+# INICJALIZACJA BAZY
+# =====================
 
 def init_db():
     conn = get_db()
@@ -43,7 +43,6 @@ def init_db():
     );
     """)
 
-    # brakujące kolumny
     columns = {
         "quantity": "REAL",
         "payment": "TEXT",
@@ -52,7 +51,6 @@ def init_db():
         "reason": "TEXT",
         "position": "INTEGER DEFAULT 1"
     }
-
     for col, typ in columns.items():
         cur.execute(f"""
         DO $$
@@ -90,9 +88,9 @@ def create_default_users():
 init_db()
 create_default_users()
 
-# =====================================================
+# =====================
 # POMOCNICZE
-# =====================================================
+# =====================
 
 def is_admin():
     return session.get("role") == "admin"
@@ -106,9 +104,9 @@ def status_icon(s):
     if s == "NIE WYKONANE": return "❌"
     return "⚪"
 
-# =====================================================
+# =====================
 # LOGIN
-# =====================================================
+# =====================
 
 @app.route("/", methods=["GET","POST"])
 def login():
@@ -125,12 +123,10 @@ def login():
             session["role"] = user["role"]
             return redirect("/admin" if user["role"]=="admin" else "/driver")
     return """
-    <h2>Logowanie</h2>
-    <form method='post'>
+    <h2>Logowanie</h2><form method='post'>
     Login:<br><input name='login'><br>
     Hasło:<br><input type='password' name='password'><br><br>
-    <button>Zaloguj</button>
-    </form>
+    <button>Zaloguj</button></form>
     """
 
 @app.route("/logout")
@@ -138,25 +134,37 @@ def logout():
     session.clear()
     return redirect("/")
 
-# =====================================================
-# ADMIN – AKTYWNE
-# =====================================================
+# =====================
+# PANEL ADMIN – AKTYWNE ZLECENIA
+# =====================
 
 @app.route("/admin", methods=["GET","POST"])
 def admin():
-    if not is_admin():
-        return redirect("/")
+    if not is_admin(): return redirect("/")
 
     conn = get_db()
     cur = conn.cursor()
 
-    if request.method == "POST":
+    # DODAWANIE NOWEGO ZLECENIA
+    if request.method == "POST" and "add_order" in request.form:
         cur.execute("""
-        UPDATE orders SET
-            status=%s,
-            driver=%s,
-            date=%s,
-            position=%s
+        INSERT INTO orders (client,address,date,status,driver,position)
+        VALUES (%s,%s,%s,%s,%s,%s)
+        """, (
+            request.form["client"],
+            request.form["address"],
+            request.form["date"],
+            "DO REALIZACJI",
+            request.form["driver"].lower(),
+            request.form["position"]
+        ))
+        conn.commit()
+        return redirect("/admin")
+
+    # EDYCJA ZLECENIA
+    if request.method == "POST" and "edit_order" in request.form:
+        cur.execute("""
+        UPDATE orders SET status=%s,driver=%s,date=%s,position=%s
         WHERE id=%s
         """, (
             request.form["status"],
@@ -166,6 +174,7 @@ def admin():
             request.form["order_id"]
         ))
         conn.commit()
+        return redirect("/admin")
 
     cur.execute("""
     SELECT * FROM orders
@@ -176,38 +185,52 @@ def admin():
     cur.close()
     conn.close()
 
-    html = "<h2>🔵 AKTYWNE</h2>"
-    html += "<a href='/admin/done'>WYKONANE</a><br><br>"
+    html = "<h1>🔵 AKTYWNE ZLECENIA</h1>"
+    html += "<a href='/admin/done'>Przejdź do wykonanych</a><br><br>"
 
+    # FORMULARZ DODAWANIA ZLECENIA
+    html += """
+    <h3>➕ Dodaj nowe zlecenie</h3>
+    <form method='post'>
+      Klient: <input name='client'><br>
+      Adres: <input name='address'><br>
+      Data: <input type='date' name='date' value='{}'><br>
+      Kierowca: <input name='driver'><br>
+      Kolejność: <input name='position' value='1'><br>
+      <button name='add_order'>Dodaj zlecenie</button>
+    </form><br>
+    """.format(date.today())
+
+    # LISTA AKTYWNYCH
     for z in orders:
         html += f"""
-        <form method='post' style='border:1px solid gray;padding:10px;margin:10px'>
-        <b>{status_icon(z['status'])} {z['client']}</b> | {z['address']}<br>
-        Data: <input type='date' name='date' value='{z['date']}'>
+        <form method='post' style='border:1px solid #aaa;padding:10px;margin:10px'>
+        <b>{status_icon(z['status'])} {z['client']}</b><br>
+        {z['address']} | {z['date']}<br>
         Kierowca: <input name='driver' value='{z['driver']}'>
-        Kolejność: <input name='position' value='{z['position']}'>
+        Kolejność: <input name='position' value='{z['position']}'><br>
         Status:
         <select name='status'>
-            <option {'selected' if z['status']=="DO REALIZACJI" else ""}>DO REALIZACJI</option>
-            <option {'selected' if z['status']=="W TOKU" else ""}>W TOKU</option>
-            <option {'selected' if z['status']=="WYKONANE" else ""}>WYKONANE</option>
-            <option {'selected' if z['status']=="NIE WYKONANE" else ""}>NIE WYKONANE</option>
-        </select>
+            <option {'selected' if z['status']=="DO REALIZACJI" else ''}>DO REALIZACJI</option>
+            <option {'selected' if z['status']=="W TOKU" else ''}>W TOKU</option>
+            <option {'selected' if z['status']=="NIE WYKONANE" else ''}>NIE WYKONANE</option>
+            <option {'selected' if z['status']=="WYKONANE" else ''}>WYKONANE</option>
+        </select><br>
+        Data: <input type='date' name='date' value='{z['date']}'><br>
         <input type='hidden' name='order_id' value='{z['id']}'>
-        <button>Zapisz</button>
+        <button name='edit_order'>Zapisz zmiany</button>
         </form>
         """
 
     return html
 
-# =====================================================
-# ADMIN – WYKONANE
-# =====================================================
+# =====================
+# PANEL ADMIN – WYKONANE
+# =====================
 
 @app.route("/admin/done")
 def admin_done():
-    if not is_admin():
-        return redirect("/")
+    if not is_admin(): return redirect("/")
 
     conn = get_db()
     cur = conn.cursor()
@@ -216,22 +239,21 @@ def admin_done():
     cur.close()
     conn.close()
 
-    html = "<h2>🟢 WYKONANE</h2>"
-    html += "<a href='/admin'>AKTYWNE</a><br><br>"
+    html = "<h1>🟢 WYKONANE ZLECENIA</h1>"
+    html += "<a href='/admin'>Powrót</a><br><br>"
 
     for z in orders:
-        html += f"{z['date']} | {z['driver']} | {z['client']}<br>"
+        html += f"{status_icon(z['status'])} {z['date']} | {z['driver']} | {z['client']}<br>"
 
     return html
 
-# =====================================================
+# =====================
 # TRASÓWKA
-# =====================================================
+# =====================
 
-@app.route("/route/<driver>/<route_date>")
-def route(driver, route_date):
-    if not is_admin():
-        return redirect("/")
+@app.route("/route/<driver>/<drv_date>")
+def route(driver, drv_date):
+    if not is_admin(): return redirect("/")
 
     conn = get_db()
     cur = conn.cursor()
@@ -239,29 +261,25 @@ def route(driver, route_date):
     SELECT * FROM orders
     WHERE driver=%s AND date=%s
     ORDER BY position
-    """, (driver.lower(), route_date))
+    """, (driver.lower(), drv_date))
     orders = cur.fetchall()
     cur.close()
     conn.close()
 
-    html = f"<h2>🚛 Trasa {driver.capitalize()} - {route_date}</h2>"
-
+    html = f"<h1>🚛 Trasa {driver.capitalize()} | {drv_date}</h1>"
     for z in orders:
-        html += f"{z['position']}. {z['client']} - {z['address']}<br>"
-
+        html += f"{z['position']}. {z['client']} – {z['address']}<br>"
     return html
 
-# =====================================================
+# =====================
 # PANEL KIEROWCY
-# =====================================================
+# =====================
 
 @app.route("/driver", methods=["GET","POST"])
 def driver_panel():
-    if not is_driver():
-        return redirect("/")
+    if not is_driver(): return redirect("/")
 
     user = session["user"]
-
     conn = get_db()
     cur = conn.cursor()
 
@@ -288,25 +306,24 @@ def driver_panel():
         conn.commit()
 
     cur.execute("""
-    SELECT * FROM orders
-    WHERE driver=%s
+    SELECT * FROM orders WHERE driver=%s
     ORDER BY date, position
     """, (user,))
     orders = cur.fetchall()
     cur.close()
     conn.close()
 
-    html = f"<h2>🚛 Panel kierowcy: {user}</h2>"
+    html = f"<h1>🚛 Panel kierowcy | {user.capitalize()}</h1>"
 
     for z in orders:
         html += f"""
-        <form method='post' style='border:1px solid gray;padding:10px;margin:10px'>
+        <form method='post' style='border:1px solid #aaa;padding:10px;margin:10px'>
         <b>{status_icon(z['status'])} {z['client']}</b><br>
         Status:
         <select name='status'>
-            <option>W TOKU</option>
-            <option>WYKONANE</option>
-            <option>NIE WYKONANE</option>
+            <option {'selected' if z['status']=="W TOKU" else ''}>W TOKU</option>
+            <option {'selected' if z['status']=="WYKONANE" else ''}>WYKONANE</option>
+            <option {'selected' if z['status']=="NIE WYKONANE" else ''}>NIE WYKONANE</option>
         </select><br>
         Ilość (m³): <input name='quantity' value='{z['quantity'] or ""}'><br>
         Płatność: <input name='payment' value='{z['payment'] or ""}'><br>
