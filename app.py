@@ -79,7 +79,7 @@ def is_driver(): return session.get("role") == "driver"
 
 def status_color(status): colors = { "DO REALIZACJI":"#cce5ff", "W TOKU":"#fff3cd", "NIE WYKONANE":"#f8d7da", "WYKONANE":"#d4edda" } return colors.get(status,"#ffffff")
 
-def sidebar(active=''): options = [ ('/admin','➕ Nowe zlecenie'), ('/admin/active','📋 Aktywne'), ('/admin/done','✅ Wykonane'), ('/admin/routes','🚛 Trasówki'), ] html = "<div style='width:200px;background:#f0f0f0;height:100vh;float:left;padding:20px'>" html += f"<h3>ADMIN</h3>" for link,label in options: style = 'padding:8px;display:block;margin:5px 0;border-radius:6px;background:#ddd;' if link==active else 'padding:8px;display:block;margin:5px 0;' html += f"<a href='{link}' style='{style} text-decoration:none;color:black'>{label}</a>" html += "<br><a href='/logout' style='color:red'>Wyloguj</a></div>" return html
+def sidebar(active=''): options = [ ('/admin','➕ Nowe zlecenie'), ('/admin/active','📋 Aktywne'), ('/admin/done','✅ Wykonane'), ('/admin/routes','🚛 Trasówki'), ] html = "<div style='width:200px;background:#e0f2f1;height:100vh;float:left;padding:20px'>" html += f"<h3>ADMIN</h3>" for link,label in options: style = 'padding:8px;display:block;margin:5px 0;border-radius:6px;background:#b2dfdb;' if link==active else 'padding:8px;display:block;margin:5px 0;' html += f"<a href='{link}' style='{style} text-decoration:none;color:black'>{label}</a>" html += "<br><a href='/logout' style='color:red'>Wyloguj</a></div>" return html
 
 =====================
 
@@ -87,9 +87,9 @@ LOGIN
 
 =====================
 
-@app.route("/", methods=["GET","POST"]) def login(): if request.method=="POST": conn=db(); cur=conn.cursor() cur.execute("SELECT * FROM users WHERE login=%s AND password=%s", (request.form["login"],request.form["password"])) user=cur.fetchone(); cur.close(); conn.close() if user: session["user"] = user["login"] session["role"] = user["role"] return redirect("/admin" if user["role"]=="admin" else "/driver") return """ <h2>Logowanie</h2> <form method='post'> Login:<br><input name='login'><br> Hasło:<br><input type='password' name='password'><br><br> <button>Zaloguj</button> </form> """
+@app.route('/', methods=['GET','POST']) def login(): if request.method=='POST': conn=db(); cur=conn.cursor() cur.execute("SELECT * FROM users WHERE login=%s AND password=%s", (request.form['login'], request.form['password'])) user=cur.fetchone(); cur.close(); conn.close() if user: session['user'] = user['login'] session['role'] = user['role'] return redirect('/admin' if user['role']=='admin' else '/driver') return """ <h2>Logowanie</h2> <form method='post'> Login:<br><input name='login'><br> Hasło:<br><input type='password' name='password'><br><br> <button>Zaloguj</button> </form> """
 
-@app.route("/logout") def logout(): session.clear() return redirect("/")
+@app.route('/logout') def logout(): session.clear() return redirect('/')
 
 =====================
 
@@ -97,18 +97,18 @@ ADMIN – NOWE ZLECENIE
 
 =====================
 
-@app.route("/admin", methods=["GET","POST"]) def admin_new(): if not is_admin(): return redirect("/")
+@app.route('/admin', methods=['GET','POST']) def admin_new(): if not is_admin(): return redirect('/')
 
 conn=db(); cur=conn.cursor()
 cur.execute("SELECT login FROM users WHERE role='driver'"); drivers=[d['login'] for d in cur.fetchall()]; cur.close(); conn.close()
 
-if request.method=="POST":
+if request.method=='POST':
     conn=db(); cur=conn.cursor()
     cur.execute("INSERT INTO orders (client,address,date,status,driver,time_of_day) VALUES (%s,%s,%s,'DO REALIZACJI',%s,%s)",(
         request.form['client'], request.form['address'], request.form['date'], request.form['driver'], request.form['time_of_day']
     ))
     conn.commit(); cur.close(); conn.close()
-    return redirect("/admin")
+    return redirect('/admin')
 
 times_of_day = ['Rano (7-10)','Po południu (15-18)','Wieczorem (19-22)']
 
@@ -124,7 +124,7 @@ ADMIN – WYKONANE
 
 =====================
 
-@app.route("/admin/done") def admin_done(): if not is_admin(): return redirect("/") conn=db(); cur=conn.cursor() cur.execute("SELECT * FROM orders WHERE status='WYKONANE' ORDER BY date DESC") orders=cur.fetchall(); cur.close(); conn.close()
+@app.route('/admin/done') def admin_done(): if not is_admin(): return redirect('/') conn=db(); cur=conn.cursor() cur.execute("SELECT * FROM orders WHERE status='WYKONANE' ORDER BY date DESC") orders=cur.fetchall(); cur.close(); conn.close()
 
 html=sidebar('/admin/done')+"<div style='margin-left:220px;padding:20px'><h2>✅ Wykonane</h2>"
 for o in orders:
@@ -133,38 +133,79 @@ return html+"</div>"
 
 =====================
 
+ADMIN – TRASÓWKI Z CHMURKAMI
+
+=====================
+
+@app.route('/admin/routes', methods=['GET','POST']) def admin_routes(): if not is_admin(): return redirect('/')
+
+conn=db(); cur=conn.cursor()
+cur.execute("SELECT login FROM users WHERE role='driver'"); drivers=[d['login'] for d in cur.fetchall()]; cur.close(); conn.close()
+
+html=sidebar('/admin/routes')+"<div style='margin-left:220px;padding:20px'><h2>🚛 Trasówki</h2>"
+html+="<h4>Wybierz kierowcę:</h4>"
+for d in drivers:
+    html+=f"<form method='post'><button name='driver' value='{d}'>{d.capitalize()}</button></form>"
+
+if request.method=='POST' and 'driver' in request.form:
+    session['route_driver'] = request.form['driver']
+    return redirect('/admin/routes/date')
+
+html+="</div>"
+return html
+
+@app.route('/admin/routes/date', methods=['GET','POST']) def admin_routes_date(): if not is_admin() or 'route_driver' not in session: return redirect('/admin/routes') driver=session['route_driver']
+
+html=sidebar('/admin/routes')+f"<div style='margin-left:220px;padding:20px'><h2>Trasówki {driver.capitalize()}</h2>"
+html+="<form method='post'>Wybierz datę: <input type='date' name='date'><button>Pokaż</button></form></div>"
+
+if request.method=='POST' and 'date' in request.form:
+    return redirect(f"/admin/route/{driver}/{request.form['date']}")
+return html
+
+@app.route('/admin/route/<driver>/<rdate>') def admin_route_detail(driver,rdate): if not is_admin(): return redirect('/') conn=db(); cur=conn.cursor() cur.execute("SELECT * FROM orders WHERE driver=%s AND date=%s ORDER BY id",(driver,rdate)) orders=cur.fetchall() cur.execute("SELECT * FROM fuel_logs WHERE driver=%s AND date=%s",(driver,rdate)) fuels=cur.fetchall() cur.execute("SELECT * FROM driver_days WHERE driver=%s AND date=%s",(driver,rdate)) day=cur.fetchone(); cur.close(); conn.close()
+
+html=sidebar('/admin/routes')+f"<div style='margin-left:220px;padding:20px'><h2>Trasa {driver.capitalize()} | {rdate}</h2>"
+if day and day['closed']:
+    html+="<b style='color:red'>Dzień zamknięty</b><br>"
+for o in orders:
+    html+=f"{o['client']} - {o['address']} | {o.get('quantity','')} m³ | {o.get('amount','')} zł<br>"
+html+="<h3>Tankowania:</h3>"
+for f in fuels:
+    html+=f"Licznik: {f['mileage']} | Litry: {f['liters']}<br>"
+return html+"</div>"
+
+=====================
+
 PANEL KIEROWCY
 
 =====================
 
-@app.route("/driver", methods=["GET","POST"]) def driver_panel(): if not is_driver(): return redirect("/") user=session['user']; today=date.today()
+@app.route('/driver', methods=['GET','POST']) def driver_panel(): if not is_driver(): return redirect('/') user=session['user']; today=date.today()
 
 conn=db(); cur=conn.cursor()
 cur.execute("SELECT * FROM driver_days WHERE driver=%s AND date=%s",(user,today))
 day=cur.fetchone()
 
-# START DZIEŃ
-if request.method=='POST' and 'start_day' in request.form:
-    if not day:
-        cur.execute("INSERT INTO driver_days (driver,date,closed,start_time) VALUES (%s,%s,FALSE,%s)",(user,today,datetime.now()))
-    else:
-        cur.execute("UPDATE driver_days SET start_time=%s,closed=FALSE,end_time=NULL WHERE driver=%s AND date=%s",(datetime.now(),user,today))
-    conn.commit()
-
-# ZAKOŃCZ DZIEŃ
-if request.method=='POST' and 'close_day' in request.form and day and not day['closed']:
-    cur.execute("UPDATE driver_days SET closed=TRUE,end_time=%s WHERE driver=%s AND date=%s",(datetime.now(),user,today))
+# START / ZAKOŃCZ DZIEŃ
+if request.method=='POST':
+    if 'start_day' in request.form:
+        if not day:
+            cur.execute("INSERT INTO driver_days (driver,date,closed,start_time) VALUES (%s,%s,FALSE,%s)",(user,today,datetime.now()))
+        else:
+            cur.execute("UPDATE driver_days SET start_time=%s,closed=FALSE,end_time=NULL WHERE driver=%s AND date=%s",(datetime.now(),user,today))
+    if 'close_day' in request.form and day and not day['closed']:
+        cur.execute("UPDATE driver_days SET closed=TRUE,end_time=%s WHERE driver=%s AND date=%s",(datetime.now(),user,today))
     conn.commit()
 
 cur.execute("SELECT * FROM orders WHERE driver=%s AND date=%s ORDER BY id",(user,today))
 orders=cur.fetchall(); cur.close(); conn.close()
 
 html=f"<h2>🚛 Panel dzienny | {user.capitalize()} | {today}</h2>"
-
 if day and day['closed']:
     html+="<b style='color:red'>DZIEŃ ZAMKNIĘTY</b><br>"
 
-# START / ZAKOŃCZ DZIEŃ
+# START / ZAKOŃCZ
 html+="<form method='post'>"
 if not day:
     html+="<button name='start_day'>START DZIEŃ</button>"
@@ -197,4 +238,4 @@ for o in orders:
 html+="<br><a href='/logout'>Wyloguj</a>"
 return html
 
-if name == "main": app.run(host="0.0.0.0", port=10000)
+if name == 'main': app.run(host='0.0.0.0', port=10000)
