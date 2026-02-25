@@ -6,12 +6,7 @@ app = Flask(__name__)
 
 kierowcy = ["Jan", "Piotr", "Marek", "Anna"]
 
-zlecenia = [
-    {"id": 1, "klient": "Firma XYZ", "adres": "ul. A 1",
-     "data": str(date.today()), "status": "DO REALIZACJI",
-     "kierowca": None, "masa": None, "platnosc": None,
-     "kwota": None, "notatki": ""}
-]
+zlecenia = []
 
 def status_color(status):
     if status == "DO REALIZACJI":
@@ -25,7 +20,7 @@ def status_color(status):
 @app.route("/")
 def home():
     return """
-    <body style='background:#111;color:white;font-family:Arial;text-align:center;padding:40px'>
+    <body style='background:#f4f6f9;font-family:Arial;text-align:center;padding:40px'>
         <h1>🚛 EkoTrans System</h1>
         <br>
         <a href='/admin' style='padding:15px 30px;background:#4caf50;color:white;text-decoration:none;border-radius:8px;font-size:18px'>Panel Admin</a>
@@ -34,25 +29,66 @@ def home():
     </body>
     """
 
-@app.route("/admin")
+@app.route("/admin", methods=["GET", "POST"])
 def admin():
+    if request.method == "POST":
+        nowe = {
+            "id": len(zlecenia) + 1,
+            "klient": request.form["klient"],
+            "adres": request.form["adres"],
+            "data": request.form["data"],
+            "priorytet": request.form["priorytet"],
+            "godziny": request.form["godziny"],
+            "status": "DO REALIZACJI",
+            "kierowca": None,
+            "masa": None,
+            "platnosc": None,
+            "kwota": None,
+            "notatki": ""
+        }
+        zlecenia.append(nowe)
+        return redirect("/admin")
+
     html = """
-    <body style='background:#111;color:white;font-family:Arial;padding:20px'>
+    <body style='background:#f4f6f9;font-family:Arial;padding:30px'>
     <h2>📋 Panel Admin</h2>
-    <a href='/' style='color:#4caf50'>⬅ Powrót</a><br><br>
+    <a href='/'>⬅ Powrót</a>
+    <h3>➕ Dodaj nowe zlecenie</h3>
+    <form method='post' style='background:white;padding:20px;border-radius:10px;margin-bottom:30px'>
+        Klient:<br>
+        <input name='klient' style='width:100%;padding:10px;margin-bottom:10px'>
+        Adres:<br>
+        <input name='adres' style='width:100%;padding:10px;margin-bottom:10px'>
+        Data:<br>
+        <input type='date' name='data' value='""" + str(date.today()) + """' style='width:100%;padding:10px;margin-bottom:10px'>
+        Priorytet:<br>
+        <select name='priorytet' style='width:100%;padding:10px;margin-bottom:10px'>
+            <option>Normalne</option>
+            <option>PILNE</option>
+        </select>
+        Godziny odbioru:<br>
+        <input name='godziny' placeholder='np. 8:00-12:00 lub RANO' style='width:100%;padding:10px;margin-bottom:20px'>
+        <button type='submit' style='padding:12px 20px;background:#4caf50;color:white;border:none;border-radius:6px'>
+            Dodaj zlecenie
+        </button>
+    </form>
+    <h3>📦 Lista zleceń</h3>
     """
 
     for z in zlecenia:
         html += f"""
-        <div style='background:#1e1e1e;padding:20px;margin-bottom:20px;border-radius:12px'>
-            <h3>{z['klient']}</h3>
-            <p>{z['adres']}</p>
-            <p>Status: <span style='color:{status_color(z['status'])}'><b>{z['status']}</b></span></p>
-            <p>Kierowca: {z['kierowca']}</p>
-            <p>Masa: {z['masa']} m³</p>
-            <p>Płatność: {z['platnosc']}</p>
-            <p>Kwota: {z['kwota']}</p>
-            <p>Notatki: {z['notatki']}</p>
+        <div style='background:white;padding:20px;margin-bottom:15px;border-radius:10px'>
+            <b>{z['klient']}</b><br>
+            {z['adres']}<br>
+            Data: {z['data']}<br>
+            Priorytet: {z['priorytet']}<br>
+            Godziny: {z['godziny']}<br>
+            Status: <span style='color:{status_color(z['status'])}'><b>{z['status']}</b></span><br>
+            Kierowca: {z['kierowca']}<br>
+            Masa: {z['masa']} m³<br>
+            Płatność: {z['platnosc']}<br>
+            Kwota: {z['kwota']}<br>
+            Notatki: {z['notatki']}
         </div>
         """
 
@@ -74,17 +110,20 @@ def kierowca():
         return redirect("/kierowca")
 
     html = """
-    <body style='background:#111;color:white;font-family:Arial;padding:20px'>
+    <body style='background:#f4f6f9;font-family:Arial;padding:30px'>
     <h2>🚛 Panel Kierowcy</h2>
-    <a href='/' style='color:#4caf50'>⬅ Powrót</a><br><br>
+    <a href='/'>⬅ Powrót</a><br><br>
     """
 
     for z in zlecenia:
         html += f"""
-        <form method='post' style='background:#1e1e1e;padding:20px;margin-bottom:20px;border-radius:12px'>
-            <h3>{z['klient']}</h3>
-            <p>{z['adres']}</p>
-            <p>Status: <span style='color:{status_color(z['status'])}'>{z['status']}</span></p>
+        <form method='post' style='background:white;padding:20px;margin-bottom:20px;border-radius:10px'>
+            <b>{z['klient']}</b><br>
+            {z['adres']}<br>
+            Data: {z['data']}<br>
+            Priorytet: {z['priorytet']}<br>
+            Godziny: {z['godziny']}<br>
+            Status: <span style='color:{status_color(z['status'])}'>{z['status']}</span><br><br>
 
             <input type='hidden' name='zlecenie' value='{z['id']}'>
 
@@ -108,7 +147,7 @@ def kierowca():
             Notatki:<br>
             <input name='notatki' style='width:100%;padding:10px;margin-bottom:20px'>
 
-            <button type='submit' style='width:100%;padding:15px;background:#4caf50;color:white;border:none;border-radius:8px;font-size:16px'>
+            <button type='submit' style='width:100%;padding:12px;background:#2196f3;color:white;border:none;border-radius:6px'>
                 Zakończ zlecenie
             </button>
         </form>
