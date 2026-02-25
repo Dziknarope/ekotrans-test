@@ -1,54 +1,65 @@
 from flask import Flask, request, redirect
 from datetime import date
+import os
 
 app = Flask(__name__)
 
-# Lista kierowców (demo)
-kierowcy = [
-    {"id": 1, "imie": "Jan"},
-    {"id": 2, "imie": "Piotr"},
-    {"id": 3, "imie": "Marek"},
-    {"id": 4, "imie": "Anna"},
+kierowcy = ["Jan", "Piotr", "Marek", "Anna"]
+
+zlecenia = [
+    {"id": 1, "klient": "Firma XYZ", "adres": "ul. A 1",
+     "data": str(date.today()), "status": "DO REALIZACJI",
+     "kierowca": None, "masa": None, "platnosc": None,
+     "kwota": None, "notatki": ""}
 ]
 
-# Demo lista zleceń
-zlecenia = [
-    {"id": 1, "klient": "Firma XYZ", "adres": "ul. A 1", "data": str(date.today()), 
-     "status": "DO REALIZACJI", "kierowca": None, "masa": None, "platnosc": None, 
-     "kwota": None, "notatki": ""},
-    {"id": 2, "klient": "EcoTrans", "adres": "ul. B 2", "data": str(date.today()), 
-     "status": "DO REALIZACJI", "kierowca": None, "masa": None, "platnosc": None, 
-     "kwota": None, "notatki": ""},
-]
+def status_color(status):
+    if status == "DO REALIZACJI":
+        return "#ff9800"
+    if status == "W TOKU":
+        return "#2196f3"
+    if status == "WYKONANE":
+        return "#4caf50"
+    return "#999"
 
 @app.route("/")
 def home():
     return """
-    <h1>System EkoTrans</h1>
-    <a href='/admin'>Panel Admin</a><br><br>
-    <a href='/kierowca'>Panel Kierowcy</a>
+    <body style='background:#111;color:white;font-family:Arial;text-align:center;padding:40px'>
+        <h1>🚛 EkoTrans System</h1>
+        <br>
+        <a href='/admin' style='padding:15px 30px;background:#4caf50;color:white;text-decoration:none;border-radius:8px;font-size:18px'>Panel Admin</a>
+        <br><br>
+        <a href='/kierowca' style='padding:15px 30px;background:#2196f3;color:white;text-decoration:none;border-radius:8px;font-size:18px'>Panel Kierowcy</a>
+    </body>
     """
 
 @app.route("/admin")
 def admin():
-    html = "<h2>Panel Admin</h2><a href='/'>Powrót</a><br><br>"
+    html = """
+    <body style='background:#111;color:white;font-family:Arial;padding:20px'>
+    <h2>📋 Panel Admin</h2>
+    <a href='/' style='color:#4caf50'>⬅ Powrót</a><br><br>
+    """
+
     for z in zlecenia:
         html += f"""
-        <div style='border:1px solid black;padding:10px;margin:10px'>
-        <b>Zlecenie ID: {z['id']}</b><br>
-        Klient: {z['klient']}<br>
-        Adres: {z['adres']}<br>
-        Status: {z['status']}<br>
-        Kierowca: {z['kierowca']}<br>
-        Masa: {z['masa']} m³<br>
-        Płatność: {z['platnosc']}<br>
-        Kwota: {z['kwota']}<br>
-        Notatki: {z['notatki']}<br>
+        <div style='background:#1e1e1e;padding:20px;margin-bottom:20px;border-radius:12px'>
+            <h3>{z['klient']}</h3>
+            <p>{z['adres']}</p>
+            <p>Status: <span style='color:{status_color(z['status'])}'><b>{z['status']}</b></span></p>
+            <p>Kierowca: {z['kierowca']}</p>
+            <p>Masa: {z['masa']} m³</p>
+            <p>Płatność: {z['platnosc']}</p>
+            <p>Kwota: {z['kwota']}</p>
+            <p>Notatki: {z['notatki']}</p>
         </div>
         """
+
+    html += "</body>"
     return html
 
-@app.route("/kierowca", methods=["GET","POST"])
+@app.route("/kierowca", methods=["GET", "POST"])
 def kierowca():
     if request.method == "POST":
         z_id = int(request.form["zlecenie"])
@@ -62,37 +73,49 @@ def kierowca():
                 z["kierowca"] = request.form["kierowca"]
         return redirect("/kierowca")
 
-    html = "<h2>Panel Kierowcy</h2><a href='/'>Powrót</a><br><br>"
+    html = """
+    <body style='background:#111;color:white;font-family:Arial;padding:20px'>
+    <h2>🚛 Panel Kierowcy</h2>
+    <a href='/' style='color:#4caf50'>⬅ Powrót</a><br><br>
+    """
+
     for z in zlecenia:
         html += f"""
-        <form method='post' style='border:1px solid black;padding:15px;margin:10px'>
-        <b>{z['klient']} – {z['adres']}</b><br>
-        Status: {z['status']}<br><br>
-        <input type='hidden' name='zlecenie' value='{z['id']}'>
-        Kierowca:<br>
-        <select name='kierowca'>
-            <option>Jan</option>
-            <option>Piotr</option>
-            <option>Marek</option>
-            <option>Anna</option>
-        </select><br>
-        Masa (m³):<br>
-        <input name='masa'><br>
-        Płatność:<br>
-        <select name='platnosc'>
-            <option>Gotówka</option>
-            <option>Przelew</option>
-        </select><br>
-        Kwota:<br>
-        <input name='kwota'><br>
-        Notatki:<br>
-        <input name='notatki'><br><br>
-        <button type='submit'>Zakończ zlecenie</button>
+        <form method='post' style='background:#1e1e1e;padding:20px;margin-bottom:20px;border-radius:12px'>
+            <h3>{z['klient']}</h3>
+            <p>{z['adres']}</p>
+            <p>Status: <span style='color:{status_color(z['status'])}'>{z['status']}</span></p>
+
+            <input type='hidden' name='zlecenie' value='{z['id']}'>
+
+            Kierowca:<br>
+            <select name='kierowca' style='width:100%;padding:10px;margin-bottom:10px'>
+                {''.join([f"<option>{k}</option>" for k in kierowcy])}
+            </select>
+
+            Masa (m³):<br>
+            <input name='masa' style='width:100%;padding:10px;margin-bottom:10px'>
+
+            Płatność:<br>
+            <select name='platnosc' style='width:100%;padding:10px;margin-bottom:10px'>
+                <option>Gotówka</option>
+                <option>Przelew</option>
+            </select>
+
+            Kwota:<br>
+            <input name='kwota' style='width:100%;padding:10px;margin-bottom:10px'>
+
+            Notatki:<br>
+            <input name='notatki' style='width:100%;padding:10px;margin-bottom:20px'>
+
+            <button type='submit' style='width:100%;padding:15px;background:#4caf50;color:white;border:none;border-radius:8px;font-size:16px'>
+                Zakończ zlecenie
+            </button>
         </form>
         """
-    return html
 
-import os
+    html += "</body>"
+    return html
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
