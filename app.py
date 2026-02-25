@@ -70,7 +70,7 @@ def create_default_users():
     cur.close()
     conn.close()
 
-# Przykładowe zlecenia do testów
+# Dodanie przykładowych zleceń
 def create_sample_orders():
     conn = get_db()
     cur = conn.cursor()
