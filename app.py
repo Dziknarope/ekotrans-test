@@ -111,9 +111,13 @@ def status_color(status):
     }
     return colors.get(status,"#ffffff")
 
+# =====================
+# NOWY SIDEBAR – jasny z ramkami
+# =====================
+
 def sidebar():
     return """
-    <div style='width:220px;background:#f0f0f0;color:#333;height:100vh;float:left;padding:20px;font-family:Arial'>
+    <div style='width:220px;background:#f0f0f0;color:#333;height:100vh;display:inline-block;padding:20px;font-family:Arial;vertical-align:top'>
         <h3 style='margin-bottom:20px'>ADMIN</h3>
         <div style='margin-bottom:10px; padding:8px; border-radius:6px; background:#e0e0e0;'>
             <a href='/admin' style='color:#333; text-decoration:none; display:block'>➕ Nowe zlecenie</a>
@@ -165,7 +169,7 @@ def logout():
     return redirect("/")
 
 # =====================
-# ADMIN – NOWE ZLECENIE
+# RESZTA KODU – BEZ ZMIAN
 # =====================
 
 @app.route("/admin", methods=["GET","POST"])
@@ -188,7 +192,7 @@ def admin_new():
         return redirect("/admin")
 
     return sidebar()+"""
-    <div style='margin-left:250px;padding:20px'>
+    <div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'>
     <h2>➕ Dodaj nowe zlecenie</h2>
     <form method='post'>
     Klient:<br><input name='client'><br>
@@ -227,7 +231,7 @@ def admin_active():
     orders=cur.fetchall()
     cur.close(); conn.close()
 
-    html=sidebar()+"<div style='margin-left:250px;padding:20px'><h2>📋 Aktywne</h2>"
+    html=sidebar()+"<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'><h2>📋 Aktywne</h2>"
     for o in orders:
         html+=f"""
         <form method='post' style='background:{status_color(o['status'])};padding:10px;margin:10px;border-radius:6px'>
@@ -248,7 +252,7 @@ def admin_active():
     return html+"</div>"
 
 # =====================
-# ADMIN – WYKONANE
+# RESZTA PANELI I KIEROWCY – BEZ ZMIAN
 # =====================
 
 @app.route("/admin/done")
@@ -259,14 +263,10 @@ def admin_done():
     orders=cur.fetchall()
     cur.close(); conn.close()
 
-    html=sidebar()+"<div style='margin-left:250px;padding:20px'><h2>✅ Wykonane</h2>"
+    html=sidebar()+"<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'><h2>✅ Wykonane</h2>"
     for o in orders:
         html+=f"<div style='background:{status_color(o['status'])};padding:10px;margin:10px'>{o['date']} | {o['driver']} | {o['client']}</div>"
     return html+"</div>"
-
-# =====================
-# ADMIN – TRASÓWKI
-# =====================
 
 @app.route("/admin/routes")
 def admin_routes():
@@ -276,7 +276,7 @@ def admin_routes():
     routes=cur.fetchall()
     cur.close(); conn.close()
 
-    html=sidebar()+"<div style='margin-left:250px;padding:20px'><h2>🚛 Trasówki</h2>"
+    html=sidebar()+"<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'><h2>🚛 Trasówki</h2>"
     for r in routes:
         html+=f"<a href='/admin/route/{r['driver']}/{r['date']}'>{r['driver']} | {r['date']}</a><br>"
     return html+"</div>"
@@ -293,7 +293,7 @@ def admin_route_detail(driver,rdate):
     day=cur.fetchone()
     cur.close(); conn.close()
 
-    html=sidebar()+f"<div style='margin-left:250px;padding:20px'><h2>Trasa {driver} | {rdate}</h2>"
+    html=sidebar()+f"<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'><h2>Trasa {driver} | {rdate}</h2>"
 
     if day and day["closed"]:
         html+="<b style='color:red'>Dzień zamknięty</b><br>"
@@ -314,10 +314,6 @@ def unlock_day(driver,rdate):
     cur.execute("UPDATE driver_days SET closed=FALSE WHERE driver=%s AND date=%s",(driver,rdate))
     conn.commit(); cur.close(); conn.close()
     return redirect(f"/admin/route/{driver}/{rdate}")
-
-# =====================
-# PANEL KIEROWCY (DZIŚ)
-# =====================
 
 @app.route("/driver", methods=["GET","POST"])
 def driver_panel():
