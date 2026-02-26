@@ -1,4 +1,8 @@
-from flask import Flask, request, redirect, session from datetime import date, datetime import os import psycopg2 import psycopg2.extras
+from flask import Flask, request, redirect, session
+from datetime import date, datetime
+import os
+import psycopg2
+import psycopg2.extras
 
 app = Flask(name) app.secret_key = "supersecretkey"
 
