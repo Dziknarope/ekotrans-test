@@ -4,7 +4,8 @@ import os
 import psycopg2
 import psycopg2.extras
 
-app = Flask(name) app.secret_key = "supersecretkey"
+app = Flask(name)
+app.secret_key = "supersecretkey"
 
 DATABASE_URL = os.environ.get("DATABASE_URL") if not DATABASE_URL: raise Exception("Brak DATABASE_URL")
 
