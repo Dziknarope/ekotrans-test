@@ -170,7 +170,7 @@ def logout():
     return redirect("/")
 
 # =====================
-# ADMIN – NOWE ZLECENIE (punkt 1 – pora dnia)
+# ADMIN – NOWE ZLECENIE
 # =====================
 
 @app.route("/admin", methods=["GET","POST"])
@@ -187,15 +187,13 @@ def admin_new():
             request.form["address"],
             request.form["date"],
             request.form["driver"].lower(),
-            1,  # pozycja domyślna, bo teraz mamy time_slot
+            1,
             request.form["time_slot"]
         ))
         conn.commit(); cur.close(); conn.close()
         return redirect("/admin")
 
-    # Wybór pory dnia zamiast kolejności
     time_options = ["Rano", "Po 15:00"]
-
     options_html = "".join([f"<option value='{t}'>{t}</option>" for t in time_options])
 
     return sidebar()+"""
@@ -214,7 +212,7 @@ def admin_new():
     """.format(date.today(), options_html)
 
 # =====================
-# RESZTA PANELI – BEZ ZMIAN
+# ADMIN – AKTYWNE
 # =====================
 
 @app.route("/admin/active", methods=["GET","POST"])
@@ -230,7 +228,7 @@ def admin_active():
         """,(
             request.form["status"],
             request.form["driver"],
-            1,  # pozycja domyślna
+            1,
             request.form.get("time_slot", ""),
             request.form["id"]
         ))
@@ -261,7 +259,7 @@ def admin_active():
     return html+"</div>"
 
 # =====================
-# RESZTA KODU (admin/done, routes, driver_panel) – BEZ ZMIAN
+# ADMIN – WYKONANE
 # =====================
 
 @app.route("/admin/done")
@@ -276,6 +274,10 @@ def admin_done():
     for o in orders:
         html+=f"<div style='background:{status_color(o['status'])};padding:10px;margin:10px'>{o['date']} | {o['driver']} | {o['client']}</div>"
     return html+"</div>"
+
+# =====================
+# ADMIN – TRASY
+# =====================
 
 @app.route("/admin/routes")
 def admin_routes():
@@ -324,6 +326,10 @@ def unlock_day(driver,rdate):
     conn.commit(); cur.close(); conn.close()
     return redirect(f"/admin/route/{driver}/{rdate}")
 
+# =====================
+# KIEROWCA – PANEL I NOWE ZLECENIE
+# =====================
+
 @app.route("/driver", methods=["GET","POST"])
 def driver_panel():
     if not is_driver(): return redirect("/")
@@ -335,41 +341,45 @@ def driver_panel():
     cur.execute("SELECT * FROM driver_days WHERE driver=%s AND date=%s",(user,today))
     day=cur.fetchone()
 
-    if request.method=="POST" and "close_day" in request.form:
-        if not day:
-            cur.execute("INSERT INTO driver_days (driver,date,closed,closed_at) VALUES (%s,%s,TRUE,%s)",
-                        (user,today,datetime.now()))
-        else:
-            cur.execute("UPDATE driver_days SET closed=TRUE, closed_at=%s WHERE driver=%s AND date=%s",
-                        (datetime.now(),user,today))
-        conn.commit()
-
-    if request.method=="POST" and "fuel" in request.form:
-        if not day or not day["closed"]:
-            cur.execute("INSERT INTO fuel_logs (driver,date,mileage,liters) VALUES (%s,%s,%s,%s)",
-                        (user,today,request.form["mileage"],request.form["liters"]))
+    # Obsługa POST
+    if request.method=="POST":
+        if "close_day" in request.form:
+            if not day:
+                cur.execute("INSERT INTO driver_days (driver,date,closed,closed_at) VALUES (%s,%s,TRUE,%s)",
+                            (user,today,datetime.now()))
+            else:
+                cur.execute("UPDATE driver_days SET closed=TRUE, closed_at=%s WHERE driver=%s AND date=%s",
+                            (datetime.now(),user,today))
             conn.commit()
 
-    if request.method=="POST" and "update_order" in request.form:
-        if not day or not day["closed"]:
-            cur.execute("""
-            UPDATE orders SET status=%s, quantity=%s, amount=%s, notes=%s
-            WHERE id=%s AND driver=%s
-            """,(
-                request.form["status"],
-                request.form["quantity"],
-                request.form["amount"],
-                request.form["notes"],
-                request.form["id"],
-                user
-            ))
-            conn.commit()
+        if "fuel" in request.form:
+            if not day or not day["closed"]:
+                cur.execute("INSERT INTO fuel_logs (driver,date,mileage,liters) VALUES (%s,%s,%s,%s)",
+                            (user,today,request.form["mileage"],request.form["liters"]))
+                conn.commit()
+
+        if "update_order" in request.form:
+            if not day or not day["closed"]:
+                cur.execute("""
+                UPDATE orders SET status=%s, quantity=%s, amount=%s, notes=%s
+                WHERE id=%s AND driver=%s
+                """,(
+                    request.form["status"],
+                    request.form["quantity"],
+                    request.form["amount"],
+                    request.form["notes"],
+                    request.form["id"],
+                    user
+                ))
+                conn.commit()
 
     cur.execute("SELECT * FROM orders WHERE driver=%s AND date=%s ORDER BY position",(user,today))
     orders=cur.fetchall()
     cur.close(); conn.close()
 
     html=f"<h2>🚛 Panel dzienny | {user.capitalize()} | {today}</h2>"
+    html+="<a href='/driver/new'>➕ Dodaj nowe zlecenie</a><br><br>"
+
     if day and day["closed"]:
         html+="<b style='color:red'>DZIEŃ ZAMKNIĘTY</b><br>"
 
@@ -408,5 +418,50 @@ def driver_panel():
     html+="<br><a href='/logout'>Wyloguj</a>"
     return html
 
+# =====================
+# KIEROWCA – NOWE ZLECENIE
+# =====================
+
+@app.route("/driver/new", methods=["GET","POST"])
+def driver_new():
+    if not is_driver(): return redirect("/")
+    user=session["user"]
+
+    if request.method=="POST":
+        conn=db(); cur=conn.cursor()
+        cur.execute("""
+        INSERT INTO orders (client,address,date,status,driver,position,time_slot)
+        VALUES (%s,%s,%s,'DO REALIZACJI',%s,%s,%s)
+        """,(
+            request.form["client"],
+            request.form["address"],
+            request.form["date"],
+            user,
+            1,
+            request.form["time_slot"]
+        ))
+        conn.commit(); cur.close(); conn.close()
+        return redirect("/driver")
+
+    time_options = ["Rano", "Po 15:00"]
+    options_html = "".join([f"<option value='{t}'>{t}</option>" for t in time_options])
+
+    return f"""
+    <h2>➕ Dodaj nowe zlecenie</h2>
+    <form method='post'>
+    Klient:<br><input name='client'><br>
+    Adres:<br><input name='address'><br>
+    Data:<brData:<br><input type='date' name='date' value='{date.today()}'><br>
+    Pora dnia:<br>
+    <select name='time_slot'>{options_html}</select><br><br>
+    <button>Dodaj</button>
+    </form>
+    <br><a href='/driver'>Powrót do panelu</a>
+    """
+
+# =====================
+# URUCHOMIENIE
+# =====================
+
 if __name__ == "__main__":
-    app.run()
+    app.run(debug=True)
