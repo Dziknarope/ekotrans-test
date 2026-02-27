@@ -170,19 +170,12 @@ def logout():
     return redirect("/")
 
 # =====================
-# ADMIN – NOWE ZLECENIE (z wyborem kierowcy i pory dnia)
+# ADMIN – NOWE ZLECENIE (punkt 1 – pora dnia)
 # =====================
 
 @app.route("/admin", methods=["GET","POST"])
 def admin_new():
     if not is_admin(): return redirect("/")
-
-    conn = db()
-    cur = conn.cursor()
-    cur.execute("SELECT login FROM users WHERE role='driver' ORDER BY login")
-    drivers = [d["login"] for d in cur.fetchall()]
-    cur.close()
-    conn.close()
 
     if request.method=="POST":
         conn=db(); cur=conn.cursor()
@@ -193,37 +186,35 @@ def admin_new():
             request.form["client"],
             request.form["address"],
             request.form["date"],
-            request.form["driver"],
-            1,
+            request.form["driver"].lower(),
+            1,  # pozycja domyślna, bo teraz mamy time_slot
             request.form["time_slot"]
         ))
         conn.commit(); cur.close(); conn.close()
         return redirect("/admin")
 
-    # pory dnia
+    # Wybór pory dnia zamiast kolejności
     time_options = ["Rano", "Po 15:00"]
-    options_html = "".join([f"<option value='{t}'>{t}</option>" for t in time_options])
-    # lista kierowców
-    driver_options = "".join([f"<option value='{d}'>{d}</option>" for d in drivers])
 
-    return sidebar()+f"""
+    options_html = "".join([f"<option value='{t}'>{t}</option>" for t in time_options])
+
+    return sidebar()+"""
     <div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'>
     <h2>➕ Dodaj nowe zlecenie</h2>
     <form method='post'>
     Klient:<br><input name='client'><br>
     Adres:<br><input name='address'><br>
-    Data:<br><input type='date' name='date' value='{date.today()}'><br>
-    Kierowca:<br>
-    <select name='driver'>{driver_options}</select><br>
+    Data:<br><input type='date' name='date' value='{0}'><br>
+    Kierowca:<br><input name='driver'><br>
     Pora dnia:<br>
-    <select name='time_slot'>{options_html}</select><br><br>
+    <select name='time_slot'>{1}</select><br><br>
     <button>Dodaj</button>
     </form>
     </div>
-    """
+    """.format(date.today(), options_html)
 
 # =====================
-# ADMIN – AKTYWNE
+# RESZTA PANELI – BEZ ZMIAN
 # =====================
 
 @app.route("/admin/active", methods=["GET","POST"])
@@ -234,12 +225,13 @@ def admin_active():
 
     if request.method=="POST":
         cur.execute("""
-        UPDATE orders SET status=%s, driver=%s, position=%s
+        UPDATE orders SET status=%s, driver=%s, position=%s, time_slot=%s
         WHERE id=%s
         """,(
             request.form["status"],
             request.form["driver"],
-            request.form["position"],
+            1,  # pozycja domyślna
+            request.form.get("time_slot", ""),
             request.form["id"]
         ))
         conn.commit()
@@ -255,7 +247,7 @@ def admin_active():
         <b>{o['client']}</b><br>
         {o['address']} | {o['date']}<br>
         Kierowca:<input name='driver' value='{o['driver']}'>
-        Kolejność:<input name='position' value='{o['position']}'><br>
+        Pora dnia:<input name='time_slot' value='{o.get('time_slot','')}'><br>
         <select name='status'>
             <option {'selected' if o['status']=="DO REALIZACJI" else ''}>DO REALIZACJI</option>
             <option {'selected' if o['status']=="W TOKU" else ''}>W TOKU</option>
@@ -269,7 +261,7 @@ def admin_active():
     return html+"</div>"
 
 # =====================
-# RESZTA PANELI – BEZ ZMIAN
+# RESZTA KODU (admin/done, routes, driver_panel) – BEZ ZMIAN
 # =====================
 
 @app.route("/admin/done")
@@ -317,7 +309,7 @@ def admin_route_detail(driver,rdate):
         html+=f"<a href='/admin/unlock/{driver}/{rdate}'>🔓 Odblokuj dzień</a><br><br>"
 
     for o in orders:
-        html+=f"{o['position']}. {o['client']} - {o['address']}<br>"
+        html+=f"{o['position']}. {o['client']} - {o['address']} ({o.get('time_slot','')})<br>"
 
     html+="<h3>⛽ Tankowania</h3>"
     for f in fuels:
@@ -386,6 +378,7 @@ def driver_panel():
         <form method='post' style='background:{status_color(o['status'])};padding:10px;margin:10px;border-radius:6px'>
         <b>{o['client']}</b><br>
         {o['address']}<br>
+        Pora dnia: {o.get('time_slot','')}<br>
         <select name='status'>
             <option {'selected' if o['status']=="W TOKU" else ''}>W TOKU</option>
             <option {'selected' if o['status']=="WYKONANE" else ''}>WYKONANE</option>
