@@ -1,9 +1,8 @@
 from flask import Flask, request, redirect, session, send_file
-from datetime import date, datetime
+from datetime import date
 import os
 import psycopg2
 import psycopg2.extras
-from io import BytesIO
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
@@ -11,322 +10,426 @@ app = Flask(__name__)
 app.secret_key = "supersecretkey"
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
-if not DATABASE_URL:
-    raise Exception("Brak DATABASE_URL")
 
-# =====================
-# POŁĄCZENIE Z BAZĄ
-# =====================
 def db():
-    return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    return psycopg2.connect(
+        DATABASE_URL,
+        cursor_factory=psycopg2.extras.RealDictCursor
+    )
 
 # =====================
-# INICJALIZACJA BAZY
+# INIT DB
 # =====================
+
 def init_db():
     conn = db()
     cur = conn.cursor()
-    # tabela użytkowników
+
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
+    CREATE TABLE IF NOT EXISTS users(
         id SERIAL PRIMARY KEY,
         login TEXT UNIQUE,
         password TEXT,
         role TEXT
-    );
+    )
     """)
-    # tabela zamówień
+
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS orders (
+    CREATE TABLE IF NOT EXISTS orders(
         id SERIAL PRIMARY KEY,
         client TEXT,
         address TEXT,
         date DATE,
         status TEXT,
         driver TEXT,
-        quantity REAL,
-        payment TEXT,
-        amount REAL,
-        notes TEXT,
-        reason TEXT,
-        position INTEGER DEFAULT 1,
+        position INTEGER,
         time_slot TEXT
-    );
+    )
     """)
-    # tabela trasówek
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS driver_days (
-        id SERIAL PRIMARY KEY,
-        driver TEXT,
-        date DATE,
-        closed BOOLEAN DEFAULT FALSE,
-        closed_at TIMESTAMP
-    );
-    """)
-    # logi paliwa
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS fuel_logs (
-        id SERIAL PRIMARY KEY,
-        driver TEXT,
-        date DATE,
-        mileage INTEGER,
-        liters REAL
-    );
-    """)
+
     conn.commit()
     cur.close()
     conn.close()
 
-# =====================
-# DODANIE DOMYŚLNYCH UŻYTKOWNIKÓW
-# =====================
-def create_users():
+def create_admin():
     conn = db()
     cur = conn.cursor()
-    users = [
-        ("admin","Turcja123","admin"),
-        ("leszek","LKR18456","driver"),
-        ("tadeusz","LKR54VN","driver"),
-        ("marcel","LKR61886","driver"),
-        ("dyzio","LKR40306","driver"),
-        ("emil","Turcja123","driver")
-    ]
-    for u in users:
-        cur.execute("INSERT INTO users (login,password,role) VALUES (%s,%s,%s) ON CONFLICT (login) DO NOTHING", u)
+
+    cur.execute("""
+    INSERT INTO users(login,password,role)
+    VALUES('admin','admin','admin')
+    ON CONFLICT(login) DO NOTHING
+    """)
+
     conn.commit()
     cur.close()
     conn.close()
 
 init_db()
-create_users()
+create_admin()
 
 # =====================
-# POMOCNICZE FUNKCJE
+# POMOCNICZE
 # =====================
+
 def is_admin():
     return session.get("role") == "admin"
 
 def status_color(status):
+
     colors = {
         "DO REALIZACJI":"#cce5ff",
         "W TOKU":"#fff3cd",
         "NIE WYKONANE":"#f8d7da",
         "WYKONANE":"#d4edda"
     }
+
     return colors.get(status,"#ffffff")
 
 # =====================
 # SIDEBAR
 # =====================
+
 def sidebar():
+
     return """
-    <div style='width:220px;background:#f0f0f0;color:#333;height:100vh;display:inline-block;
-                padding:20px;font-family:Arial;vertical-align:top'>
-        <h3 style='margin-bottom:20px'>ADMIN</h3>
-        <div style='margin-bottom:10px; padding:8px; border-radius:6px; background:#e0e0e0;'>
-            <a href='/admin' style='color:#333; text-decoration:none; display:block'>➕ Nowe zlecenie</a>
-        </div>
-        <div style='margin-bottom:10px; padding:8px; border-radius:6px; background:#e0e0e0;'>
-            <a href='/admin/active' style='color:#333; text-decoration:none; display:block'>📋 Aktywne</a>
-        </div>
-        <div style='margin-bottom:10px; padding:8px; border-radius:6px; background:#e0e0e0;'>
-            <a href='/admin/done' style='color:#333; text-decoration:none; display:block'>✅ Wykonane</a>
-        </div>
-        <div style='margin-bottom:10px; padding:8px; border-radius:6px; background:#e0e0e0;'>
-            <a href='/admin/routes' style='color:#333; text-decoration:none; display:block'>🚛 Trasówki</a>
-        </div>
-        <div style='margin-top:20px; padding:8px; border-radius:6px; background:#f8d7da;'>
-            <a href='/logout' style='color:#721c24; text-decoration:none; display:block'>Wyloguj</a>
-        </div>
+    <div style='
+        width:230px;
+        background:#1f2a38;
+        color:white;
+        height:100vh;
+        display:inline-block;
+        padding:20px;
+        font-family:Arial;
+        vertical-align:top
+    '>
+
+    <h2>🚛 Panel</h2>
+
+    <div style='margin-top:30px'>
+
+    <div style='margin-bottom:10px'>
+    <a href='/admin'
+    style='display:block;padding:10px;background:#3498db;color:white;text-decoration:none;border-radius:6px'>
+    ➕ Nowe zamówienie
+    </a>
+    </div>
+
+    <div style='margin-bottom:10px'>
+    <a href='/admin/active'
+    style='display:block;padding:10px;background:#2ecc71;color:white;text-decoration:none;border-radius:6px'>
+    📋 Zamówienia
+    </a>
+    </div>
+
+    <div style='margin-bottom:10px'>
+    <a href='/admin/routes'
+    style='display:block;padding:10px;background:#9b59b6;color:white;text-decoration:none;border-radius:6px'>
+    🚛 Trasówki
+    </a>
+    </div>
+
+    <div style='margin-top:40px'>
+    <a href='/logout'
+    style='display:block;padding:10px;background:#e74c3c;color:white;text-decoration:none;border-radius:6px'>
+    Wyloguj
+    </a>
+    </div>
+
+    </div>
     </div>
     """
 
 # =====================
-# LOGIN/LOGOUT
+# LOGIN
 # =====================
+
 @app.route("/", methods=["GET","POST"])
 def login():
-    if request.method=="POST":
-        conn=db(); cur=conn.cursor()
-        cur.execute("SELECT * FROM users WHERE login=%s AND password=%s",
-                    (request.form["login"],request.form["password"]))
-        user=cur.fetchone()
-        cur.close(); conn.close()
+
+    if request.method == "POST":
+
+        conn = db()
+        cur = conn.cursor()
+
+        cur.execute(
+            "SELECT * FROM users WHERE login=%s AND password=%s",
+            (request.form["login"], request.form["password"])
+        )
+
+        user = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
         if user:
-            session["user"]=user["login"]
-            session["role"]=user["role"]
-            return redirect("/admin" if user["role"]=="admin" else "/")
+
+            session["user"] = user["login"]
+            session["role"] = user["role"]
+
+            return redirect("/admin")
+
     return """
     <h2>Logowanie</h2>
+
     <form method='post'>
-    Login:<br><input name='login'><br>
-    Hasło:<br><input type='password' name='password'><br><br>
+    Login:<br>
+    <input name='login'><br><br>
+
+    Hasło:<br>
+    <input type='password' name='password'><br><br>
+
     <button>Zaloguj</button>
     </form>
     """
 
 @app.route("/logout")
 def logout():
+
     session.clear()
+
     return redirect("/")
 
 # =====================
-# ADMIN – NOWE ZLECENIE
+# NOWE ZAMÓWIENIE
 # =====================
+
 @app.route("/admin", methods=["GET","POST"])
-def admin_new():
-    if not is_admin(): return redirect("/")
-    if request.method=="POST":
-        conn=db(); cur=conn.cursor()
+def admin():
+
+    if not is_admin():
+        return redirect("/")
+
+    if request.method == "POST":
+
+        conn = db()
+        cur = conn.cursor()
+
+        time_slot = request.form.get("time_slot")
+
+        if time_slot == "":
+            time_slot = None
+
         cur.execute("""
-        INSERT INTO orders (client,address,date,status,driver,position,time_slot)
-        VALUES (%s,%s,%s,'DO REALIZACJI',%s,1,%s)
-        """,(
+        INSERT INTO orders(client,address,date,status,time_slot)
+        VALUES(%s,%s,%s,'DO REALIZACJI',%s)
+        """,
+        (
             request.form["client"],
             request.form["address"],
             request.form["date"],
-            request.form["driver"].lower(),
-            request.form["time_slot"]
+            time_slot
         ))
-        conn.commit(); cur.close(); conn.close()
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
         return redirect("/admin")
-    time_options = ["Rano","Po 15:00"]
-    options_html = "".join([f"<option value='{t}'>{t}</option>" for t in time_options])
+
     return sidebar() + f"""
-    <div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'>
-    <h2>➕ Dodaj nowe zlecenie</h2>
+
+    <div style='display:inline-block;padding:40px'>
+
+    <h2>➕ Nowe zamówienie</h2>
+
     <form method='post'>
-    Klient:<br><input name='client'><br>
-    Adres:<br><input name='address'><br>
-    Data:<br><input type='date' name='date' value='{date.today()}'><br>
-    Kierowca:<br><input name='driver'><br>
-    Pora dnia:<br>
-    <select name='time_slot'>{options_html}</select><br><br>
+
+    Klient<br>
+    <input name='client' required><br><br>
+
+    Adres<br>
+    <input name='address' required><br><br>
+
+    Data<br>
+    <input type='date' name='date' value='{date.today()}'><br><br>
+
+    Pora dnia<br>
+
+    <select name='time_slot'>
+    <option value=''>brak</option>
+    <option value='Rano'>Rano</option>
+    </select>
+
+    <br><br>
+
     <button>Dodaj</button>
+
     </form>
+
     </div>
     """
 
 # =====================
-# ADMIN – AKTYWNE
+# ZAMÓWIENIA
 # =====================
+
 @app.route("/admin/active", methods=["GET","POST"])
-def admin_active():
-    if not is_admin(): return redirect("/")
-    conn=db(); cur=conn.cursor()
-    if request.method=="POST":
+def active():
+
+    if not is_admin():
+        return redirect("/")
+
+    conn = db()
+    cur = conn.cursor()
+
+    if request.method == "POST":
+
         cur.execute("""
-        UPDATE orders SET status=%s, driver=%s, position=%s, time_slot=%s
+        UPDATE orders
+        SET driver=%s, position=%s, status=%s
         WHERE id=%s
-        """,(
-            request.form["status"],
+        """,
+        (
             request.form["driver"],
-            1,
-            request.form.get("time_slot",""),
+            request.form["position"],
+            request.form["status"],
             request.form["id"]
         ))
+
         conn.commit()
-    cur.execute("SELECT * FROM orders WHERE status!='WYKONANE' ORDER BY date, driver, position")
-    orders=cur.fetchall()
-    cur.close(); conn.close()
-    html = sidebar() + "<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'><h2>📋 Aktywne</h2>"
+
+    cur.execute("""
+    SELECT * FROM orders
+    ORDER BY date, driver NULLS FIRST, position NULLS FIRST
+    """)
+
+    orders = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    html = sidebar() + "<div style='display:inline-block;padding:30px'>"
+    html += "<h2>Zamówienia</h2>"
+
     for o in orders:
-        html+=f"""
-        <form method='post' style='background:{status_color(o['status'])}; padding:10px; margin:10px; border-radius:6px'>
-        <b>{o['client']}</b><br>{o['address']} | {o['date']}<br>
-        Kierowca:<input name='driver' value='{o['driver']}'><br>
-        Pora dnia:<input name='time_slot' value='{o.get('time_slot','')}'><br>
+
+        html += f"""
+
+        <form method='post'
+        style='background:{status_color(o["status"])};padding:10px;margin:10px;border-radius:6px'>
+
+        <b>{o["client"]}</b><br>
+
+        {o["address"]}<br>
+
+        {o["date"]} | {o.get("time_slot","")}<br>
+
+        Kierowca
+        <input name='driver' value='{o.get("driver","")}'>
+
+        Pozycja
+        <input name='position' value='{o.get("position","")}' style='width:40px'>
+
+        Status
+
         <select name='status'>
-            <option {'selected' if o['status']=="DO REALIZACJI" else ''}>DO REALIZACJI</option>
-            <option {'selected' if o['status']=="W TOKU" else ''}>W TOKU</option>
-            <option {'selected' if o['status']=="NIE WYKONANE" else ''}>NIE WYKONANE</option>
-            <option {'selected' if o['status']=="WYKONANE" else ''}>WYKONANE</option>
-        </select><br>
-        <input type='hidden' name='id' value='{o['id']}'>
+        <option {"selected" if o["status"]=="DO REALIZACJI" else ""}>DO REALIZACJI</option>
+        <option {"selected" if o["status"]=="W TOKU" else ""}>W TOKU</option>
+        <option {"selected" if o["status"]=="WYKONANE" else ""}>WYKONANE</option>
+        <option {"selected" if o["status"]=="NIE WYKONANE" else ""}>NIE WYKONANE</option>
+        </select>
+
+        <input type='hidden' name='id' value='{o["id"]}'>
+
         <button>Zapisz</button>
+
         </form>
         """
-    html+="</div>"
+
+    html += "</div>"
+
     return html
 
 # =====================
-# ADMIN – WYKONANE
+# TRASÓWKI
 # =====================
-@app.route("/admin/done")
-def admin_done():
-    if not is_admin(): return redirect("/")
-    conn=db(); cur=conn.cursor()
-    cur.execute("SELECT * FROM orders WHERE status='WYKONANE' ORDER BY date DESC")
-    orders=cur.fetchall()
-    cur.close(); conn.close()
-    html = sidebar() + "<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'><h2>✅ Wykonane</h2>"
-    for o in orders:
-        html+=f"<div style='background:{status_color(o['status'])}; padding:10px; margin:10px'>{o['date']} | {o['driver']} | {o['client']}</div>"
-    html+="</div>"
-    return html
 
-# =====================
-# ADMIN – TRASÓWKI
-# =====================
 @app.route("/admin/routes")
-def admin_routes():
-    if not is_admin(): return redirect("/")
-    conn=db(); cur=conn.cursor()
-    cur.execute("SELECT DISTINCT driver,date FROM orders ORDER BY date DESC")
-    routes=cur.fetchall()
-    cur.close(); conn.close()
-    html = sidebar() + "<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'><h2>🚛 Trasówki</h2>"
+def routes():
+
+    if not is_admin():
+        return redirect("/")
+
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("""
+    SELECT DISTINCT driver,date
+    FROM orders
+    WHERE driver IS NOT NULL
+    ORDER BY date DESC
+    """)
+
+    routes = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    html = sidebar() + "<div style='display:inline-block;padding:40px'>"
+
+    html += "<h2>🚛 Trasówki</h2>"
+
     for r in routes:
-        html+=f"<a href='/admin/route/{r['driver']}/{r['date']}'>{r['driver']} | {r['date']}</a><br>"
-    html+="</div>"
+
+        html += f"""
+        <div style='margin:10px'>
+        {r["driver"]} | {r["date"]}
+        <a href='/admin/pdf/{r["driver"]}/{r["date"]}'>PDF</a>
+        </div>
+        """
+
+    html += "</div>"
+
     return html
 
 # =====================
-# ADMIN – SZCZEGÓŁY TRASY I PDF
+# PDF
 # =====================
-@app.route("/admin/route/<driver>/<rdate>")
-def admin_route_detail(driver,rdate):
-    if not is_admin(): return redirect("/")
-    conn=db(); cur=conn.cursor()
-    cur.execute("SELECT * FROM orders WHERE driver=%s AND date=%s ORDER BY position",(driver,rdate))
-    orders=cur.fetchall()
-    cur.close(); conn.close()
-    html = sidebar() + f"<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'><h2>Trasa {driver} | {rdate}</h2>"
-    for o in orders:
-        html+=f"{o['position']}. {o['client']} - {o['address']} ({o.get('time_slot','')})<br>"
-    html+=f"<br><a href='/admin/route_pdf/{driver}/{rdate}' target='_blank'>🖨️ Wydruk do PDF</a>"
-    html+="</div>"
-    return html
 
-@app.route("/admin/route_pdf/<driver>/<rdate>")
-def admin_route_pdf(driver,rdate):
-    if not is_admin(): return redirect("/")
-    conn=db(); cur=conn.cursor()
-    cur.execute("SELECT * FROM orders WHERE driver=%s AND date=%s ORDER BY position",(driver,rdate))
-    orders=cur.fetchall()
-    cur.close(); conn.close()
+@app.route("/admin/pdf/<driver>/<rdate>")
+def pdf(driver, rdate):
 
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
-    y = height - 50
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(50, y, f"Trasa {driver} | {rdate}")
-    y -= 30
-    c.setFont("Helvetica", 12)
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("""
+    SELECT * FROM orders
+    WHERE driver=%s AND date=%s
+    ORDER BY position
+    """,
+    (driver,rdate))
+
+    orders = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    filename = "route.pdf"
+
+    c = canvas.Canvas(filename, pagesize=A4)
+
+    y = 800
+
+    c.setFont("Helvetica",12)
+
+    c.drawString(50,y,f"Trasówka {driver} {rdate}")
+
+    y -= 40
+
     for o in orders:
-        text = f"{o['position']}. {o['client']} - {o['address']} | {o.get('time_slot','')} | Ilość: {o['quantity'] or ''} | Kwota: {o['amount'] or ''}"
-        c.drawString(50, y, text)
-        y -= 20
-        if y < 50:
-            c.showPage()
-            y = height - 50
+
+        text = f"{o['position']}  {o['client']}  {o['address']}"
+
+        c.drawString(50,y,text)
+
+        y -= 25
+
     c.save()
-    buffer.seek(0)
-    return send_file(buffer, as_attachment=True, download_name=f"Trasa_{driver}_{rdate}.pdf", mimetype='application/pdf')
+
+    return send_file(filename, as_attachment=True)
 
 # =====================
-# URUCHOMIENIE
-# =====================
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
