@@ -1,9 +1,8 @@
-from flask import Flask, request, redirect, session, send_file
+from flask import Flask, request, redirect, session
 from datetime import date, datetime
 import os
 import psycopg2
 import psycopg2.extras
-from io import BytesIO
 from reportlab.pdfgen import canvas
 
 app = Flask(__name__)
@@ -17,14 +16,12 @@ def db():
     return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 
 # =====================
-# INIT BAZY
+# INICJALIZACJA BAZY
 # =====================
 
 def init_db():
     conn = db()
     cur = conn.cursor()
-
-    # users
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -33,62 +30,46 @@ def init_db():
         role TEXT
     );
     """)
-
-    # vehicles
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS vehicles (
-        id SERIAL PRIMARY KEY,
-        name TEXT UNIQUE
-    );
-    """)
-
-    # orders
     cur.execute("""
     CREATE TABLE IF NOT EXISTS orders (
         id SERIAL PRIMARY KEY,
         client TEXT,
         address TEXT,
         date DATE,
-        status TEXT,
+        status TEXT DEFAULT 'DO REALIZACJI',
         vehicle TEXT,
         quantity REAL,
         payment TEXT,
         amount REAL,
         notes TEXT,
         reason TEXT,
-        time_slot TEXT
+        time_slot TEXT DEFAULT 'Rano'
     );
     """)
-
     conn.commit()
     cur.close()
     conn.close()
 
-def create_users_vehicles():
+def create_users():
     conn = db()
     cur = conn.cursor()
-
-    # users
     users = [
         ("admin","Turcja123","admin")
     ]
     for u in users:
         cur.execute("INSERT INTO users (login,password,role) VALUES (%s,%s,%s) ON CONFLICT (login) DO NOTHING", u)
-
-    # vehicles
-    vehicles = ["LKR18456","LKR54VN","LKR61886","LKR40306"]
-    for v in vehicles:
-        cur.execute("INSERT INTO vehicles (name) VALUES (%s) ON CONFLICT (name) DO NOTHING", (v,))
-
     conn.commit()
     cur.close()
     conn.close()
 
+# Pojazdy na stałe w systemie
+VEHICLES = ["LKR18456","LKR54VN","LKR61886","LKR40306"]
+
 init_db()
-create_users_vehicles()
+create_users()
 
 # =====================
-# POMOCNICZE
+# FUNKCJE POMOCNICZE
 # =====================
 
 def is_admin():
@@ -108,10 +89,13 @@ def sidebar():
     <div style='width:220px;background:#f0f0f0;color:#333;height:100vh;display:inline-block;padding:20px;font-family:Arial;vertical-align:top'>
         <h3 style='margin-bottom:20px'>ADMIN</h3>
         <div style='margin-bottom:10px; padding:8px; border-radius:6px; background:#e0e0e0;'>
-            <a href='/admin/orders' style='color:#333; text-decoration:none; display:block'>📋 Zamówienia</a>
+            <a href='/admin/orders' style='color:#333; text-decoration:none; display:block'>➕ Zamówienia</a>
         </div>
         <div style='margin-bottom:10px; padding:8px; border-radius:6px; background:#e0e0e0;'>
-            <a href='/admin/routes' style='color:#333; text-decoration:none; display:block'>🚛 Trasówki</a>
+            <a href='/admin/vehicles' style='color:#333; text-decoration:none; display:block'>🚛 Trasówki</a>
+        </div>
+        <div style='margin-bottom:10px; padding:8px; border-radius:6px; background:#e0e0e0;'>
+            <a href='/admin/pdf' style='color:#333; text-decoration:none; display:block'>🖨 PDF</a>
         </div>
         <div style='margin-top:20px; padding:8px; border-radius:6px; background:#f8d7da;'>
             <a href='/logout' style='color:#721c24; text-decoration:none; display:block'>Wyloguj</a>
@@ -120,7 +104,7 @@ def sidebar():
     """
 
 # =====================
-# LOGIN
+# LOGOWANIE
 # =====================
 
 @app.route("/", methods=["GET","POST"])
@@ -156,152 +140,147 @@ def logout():
 
 @app.route("/admin/orders", methods=["GET","POST"])
 def admin_orders():
-    if not is_admin(): return redirect("/")
+    if not is_admin(): 
+        return redirect("/")
 
-    conn=db()
-    cur=conn.cursor()
+    conn = db()
+    cur = conn.cursor()
 
-    # Dodawanie zamówienia
-    if request.method=="POST" and "new_order" in request.form:
-        ts = request.form.get("time_slot") or "Rano"
-        cur.execute("""
-        INSERT INTO orders (client,address,date,status,time_slot)
-        VALUES (%s,%s,%s,'DO REALIZACJI',%s)
-        """,(
-            request.form["client"],
-            request.form["address"],
-            request.form["date"],
-            ts
-        ))
-        conn.commit()
+    if request.method == "POST":
+        try:
+            order_id = request.form.get("id")
+            cur.execute("""
+                UPDATE orders
+                SET status=%s
+                WHERE id=%s
+            """, (request.form.get("status","DO REALIZACJI"), order_id))
+            conn.commit()
+        except Exception as e:
+            print("Błąd przy aktualizacji zamówienia:", e)
 
-    # Pobranie wszystkich zamówień
-    cur.execute("SELECT * FROM orders ORDER BY date DESC")
-    orders=cur.fetchall()
-    # zabezpieczenie None
-    for o in orders:
-        if o['vehicle'] is None:
-            o['vehicle'] = ""
-        if o['time_slot'] is None:
-            o['time_slot'] = ""
-    cur.execute("SELECT name FROM vehicles")
-    vehicles=[v['name'] for v in cur.fetchall()]
-    cur.close(); conn.close()
+    cur.execute("""
+        SELECT id, client, address, date, status,
+               COALESCE(vehicle,'') AS vehicle,
+               COALESCE(time_slot,'Rano') AS time_slot
+        FROM orders
+        ORDER BY date, id
+    """)
+    orders = cur.fetchall()
+    cur.close()
+    conn.close()
 
-    # HTML
-    html=sidebar()+"<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'>"
-    html+="<h2>📋 Zamówienia</h2>"
+    html = sidebar() + "<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'><h2>📋 Zamówienia</h2>"
 
     for o in orders:
-        html+=f"""
+        html += f"""
         <form method='post' style='background:{status_color(o['status'])};padding:10px;margin:10px;border-radius:6px'>
         <b>{o['client']}</b><br>
         {o['address']} | {o['date']}<br>
-        Pora dnia: {o.get('time_slot','')}<br>
-        Pojazd: <select disabled>{''.join([f"<option value='{v}' {'selected' if v==o['vehicle'] else ''}>{v}</option>" for v in vehicles])}</select><br>
-        Status: {o['status']}<br>
+        Pojazd: {o['vehicle']}<br>
+        Pora dnia: {o['time_slot']}<br>
+        Status:
+        <select name='status'>
+            <option {'selected' if o['status']=="DO REALIZACJI" else ''}>DO REALIZACJI</option>
+            <option {'selected' if o['status']=="W TOKU" else ''}>W TOKU</option>
+            <option {'selected' if o['status']=="WYKONANE" else ''}>WYKONANE</option>
+            <option {'selected' if o['status']=="NIE WYKONANE" else ''}>NIE WYKONANE</option>
+        </select><br>
         <input type='hidden' name='id' value='{o['id']}'>
+        <button>Zapisz</button>
         </form>
         """
 
     # Dodawanie nowego zamówienia
-    time_options=["Rano",""]
-    html+=f"""
+    html += """
     <h3>➕ Dodaj nowe zamówienie</h3>
-    <form method='post'>
+    <form method='post' action='/admin/add_order'>
     Klient:<br><input name='client'><br>
     Adres:<br><input name='address'><br>
-    Data:<br><input type='date' name='date' value='{date.today()}'><br>
+    Data:<br><input type='date' name='date' value='{0}'><br>
     Pora dnia:<br>
     <select name='time_slot'>
-        {''.join([f"<option value='{t}'>{t}</option>" for t in time_options])}
+        <option>Rano</option>
+        <option></option>
     </select><br><br>
-    <button name='new_order'>Dodaj</button>
+    <button>Dodaj</button>
     </form>
-    """
-    html+="</div>"
+    """.format(date.today())
+
+    html += "</div>"
+    return html
+
+@app.route("/admin/add_order", methods=["POST"])
+def add_order():
+    if not is_admin(): 
+        return redirect("/")
+    client = request.form.get("client")
+    address = request.form.get("address")
+    order_date = request.form.get("date")
+    time_slot = request.form.get("time_slot") or "Rano"
+
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO orders (client, address, date, status, time_slot)
+        VALUES (%s,%s,%s,'DO REALIZACJI',%s)
+    """, (client, address, order_date, time_slot))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return redirect("/admin/orders")
+
+# =====================
+# TRASÓWKI / POJAZDY
+# =====================
+
+@app.route("/admin/vehicles")
+def admin_vehicles():
+    if not is_admin(): return redirect("/")
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM orders ORDER BY date, id")
+    orders = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    html = sidebar() + "<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'><h2>🚛 Trasówki / Pojazdy</h2>"
+    for vehicle in VEHICLES:
+        html += f"<h3>Pojazd {vehicle}</h3>"
+        for o in orders:
+            if o['vehicle'] == vehicle:
+                html += f"{o['date']} | {o['client']} - {o['address']} ({o.get('time_slot','Rano')})<br>"
+    html += "</div>"
     return html
 
 # =====================
-# TRASÓWKI
+# PDF ZAMÓWIENIA
 # =====================
 
-@app.route("/admin/routes")
-def admin_routes():
+@app.route("/admin/pdf")
+def admin_pdf():
     if not is_admin(): return redirect("/")
 
-    conn=db()
-    cur=conn.cursor()
-    cur.execute("SELECT DISTINCT vehicle, date FROM orders WHERE vehicle IS NOT NULL ORDER BY date DESC")
-    routes=cur.fetchall()
+    pdf_file = f"/tmp/orders_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+    c = canvas.Canvas(pdf_file)
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM orders ORDER BY date, id")
+    orders = cur.fetchall()
     cur.close(); conn.close()
 
-    html=sidebar()+"<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'>"
-    html+="<h2>🚛 Trasówki</h2>"
-
-    for r in routes:
-        html+=f"<a href='/admin/route/{r['vehicle']}/{r['date']}'>{r['vehicle']} | {r['date']}</a><br>"
-
-    html+="</div>"
-    return html
-
-@app.route("/admin/route/<vehicle>/<rdate>")
-def admin_route_detail(vehicle,rdate):
-    if not is_admin(): return redirect("/")
-
-    conn=db()
-    cur=conn.cursor()
-    cur.execute("SELECT * FROM orders WHERE vehicle=%s AND date=%s ORDER BY id",(vehicle,rdate))
-    orders=cur.fetchall()
+    y = 800
     for o in orders:
-        if o.get('time_slot') is None:
-            o['time_slot']=""
-    cur.close(); conn.close()
-
-    html=sidebar()+"<div style='display:inline-block; vertical-align:top; margin-left:20px; padding:20px'>"
-    html+=f"<h2>Trasa pojazdu {vehicle} | {rdate}</h2>"
-    for i,o in enumerate(orders,1):
-        html+=f"{i}. {o['client']} - {o['address']} (Pora: {o.get('time_slot','')})<br>"
-    html+="<br><a href='/admin/routes'>← Powrót</a>"
-    html+="</div>"
-    return html
-
-# =====================
-# PDF TRASY
-# =====================
-
-@app.route("/admin/route/<vehicle>/<rdate>/pdf")
-def route_pdf(vehicle,rdate):
-    if not is_admin(): return redirect("/")
-
-    conn=db()
-    cur=conn.cursor()
-    cur.execute("SELECT * FROM orders WHERE vehicle=%s AND date=%s ORDER BY id",(vehicle,rdate))
-    orders=cur.fetchall()
-    for o in orders:
-        if o.get('time_slot') is None:
-            o['time_slot']=""
-    cur.close(); conn.close()
-
-    buffer=BytesIO()
-    c=canvas.Canvas(buffer)
-    c.setFont("Helvetica",12)
-    y=800
-    c.drawString(50,y,f"Trasa pojazdu {vehicle} | {rdate}")
-    y-=30
-    for i,o in enumerate(orders,1):
-        c.drawString(60,y,f"{i}. {o['client']} - {o['address']} (Pora: {o['time_slot']})")
-        y-=20
-        if y<50:
+        c.drawString(50, y, f"{o['date']} | {o['client']} | {o['address']} | {o.get('vehicle','')} | {o.get('time_slot','Rano')} | {o.get('status','DO REALIZACJI')}")
+        y -= 20
+        if y < 50:
             c.showPage()
-            y=800
+            y = 800
     c.save()
-    buffer.seek(0)
-    return send_file(buffer, as_attachment=True, download_name=f"Trasa_{vehicle}_{rdate}.pdf", mimetype="application/pdf")
+    return f"PDF wygenerowany: {pdf_file}"
 
 # =====================
-# RUN
+# START
 # =====================
 
-if __name__=="__main__":
+if __name__ == "__main__":
     app.run(debug=True)
